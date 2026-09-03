@@ -7,6 +7,7 @@ import '../../services/appointment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/health_record_service.dart';
+import '../emergency/emergency_screen.dart';
 import '../login_screen.dart';
 
 class PatientDashboard extends StatelessWidget {
@@ -97,6 +98,32 @@ class PatientDashboard extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Emergency SOS
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const EmergencyScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.emergency),
+                    label: const Text(
+                      'EMERGENCY SOS',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
 
@@ -371,7 +398,8 @@ class PatientDashboard extends StatelessWidget {
                       children: alerts.map((alert) {
                         final data = alert.data();
 
-                        final isRead = data['isRead'] == true;
+                        final isRead =
+                            data['isRead'] == true;
 
                         return Card(
                           child: ListTile(
@@ -399,9 +427,8 @@ class PatientDashboard extends StatelessWidget {
                                   ),
                             onTap: () async {
                               if (!isRead) {
-                                await AlertService().markAsRead(
-                                  alert.id,
-                                );
+                                await AlertService()
+                                    .markAsRead(alert.id);
                               }
                             },
                           ),
