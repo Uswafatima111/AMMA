@@ -28,7 +28,7 @@ class HealthRecordService {
     return _firestore
         .collection('health_records')
         .where('userId', isEqualTo: userId)
-        .orderBy('recordedAt', descending: true)
+      
         .snapshots();
   }
 

@@ -15,6 +15,14 @@ class FirestoreService {
     return document.data();
   }
 
+  // Get all mothers.
+  Stream<QuerySnapshot<Map<String, dynamic>>> getMothers() {
+    return _firestore
+        .collection('mothers')
+        .orderBy('name')
+        .snapshots();
+  }
+
   // Create a mother's profile.
   Future<void> createMother({
     required String userId,

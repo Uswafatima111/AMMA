@@ -28,7 +28,7 @@ class AppointmentService {
     return _firestore
         .collection('appointments')
         .where('userId', isEqualTo: userId)
-        .orderBy('date')
+        
         .snapshots();
   }
 

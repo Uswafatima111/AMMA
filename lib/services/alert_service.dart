@@ -29,7 +29,7 @@ class AlertService {
     return _firestore
         .collection('alerts')
         .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
+        
         .snapshots();
   }
 
