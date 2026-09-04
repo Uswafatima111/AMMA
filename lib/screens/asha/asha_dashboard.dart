@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import 'asha_emergency_screen.dart';
 import 'mother_details_screen.dart';
 
 import '../../services/auth_service.dart';
@@ -55,51 +57,90 @@ class AshaDashboard extends StatelessWidget {
 
           final mothers = snapshot.data?.docs ?? [];
 
-          if (mothers.isEmpty) {
-            return const Center(
-              child: Text(
-                'No mothers found.',
-                style: TextStyle(fontSize: 18),
-              ),
-            );
-          }
-
-          return ListView.builder(
+          return ListView(
             padding: const EdgeInsets.all(16),
-            itemCount: mothers.length,
-            itemBuilder: (context, index) {
-              final mother = mothers[index].data();
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.pregnant_woman),
-                  ),
-                  title: Text(
-                    '${mother['name']}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Pregnancy Week: ${mother['pregnancyWeek']}\n'
-                    'Status: ${mother['status']}',
-                  ),
-                  isThreeLine: true,
-                  onTap: () {
+            children: [
+              // Emergency section.
+              SizedBox(
+                width: double.infinity,
+                height: 58,
+                child: ElevatedButton.icon(
+                  onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => MotherDetailsScreen(
-                          mother: mother,
-                        ),
+                        builder: (_) => const AshaEmergencyScreen(),
                       ),
                     );
                   },
+                  icon: const Icon(Icons.emergency),
+                  label: const Text(
+                    'ACTIVE EMERGENCIES',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              );
-            },
+              ),
+
+              const SizedBox(height: 24),
+
+              const Text(
+                'Registered Mothers',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              if (mothers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 30),
+                  child: Center(
+                    child: Text(
+                      'No mothers found.',
+                      style: TextStyle(fontSize: 18),
+                    ),
+                  ),
+                ),
+
+              ...mothers.map((motherDocument) {
+                final mother = motherDocument.data();
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.pregnant_woman),
+                    ),
+                    title: Text(
+                      '${mother['name']}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Pregnancy Week: ${mother['pregnancyWeek']}\n'
+                      'Status: ${mother['status']}',
+                    ),
+                    isThreeLine: true,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MotherDetailsScreen(
+                            mother: mother,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              }),
+            ],
           );
         },
       ),

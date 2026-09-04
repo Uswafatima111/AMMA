@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../ai/ai_risk_screen.dart';
 import '../../services/alert_service.dart';
 import '../../services/appointment_service.dart';
 import '../../services/auth_service.dart';
@@ -119,6 +120,35 @@ class PatientDashboard extends StatelessWidget {
                     icon: const Icon(Icons.emergency),
                     label: const Text(
                       'EMERGENCY SOS',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // AMMA AI Risk Check
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AiRiskScreen(
+                            pregnancyWeek:
+                                mother['pregnancyWeek'] ?? 0,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.psychology),
+                    label: const Text(
+                      'AMMA AI RISK CHECK',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
