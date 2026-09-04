@@ -9,6 +9,7 @@ class HealthRecordService {
     required String bloodPressure,
     required double weight,
     required double hemoglobin,
+    List<String> symptoms = const [], // NEW — was missing entirely before
     String? notes,
   }) async {
     await _firestore.collection('health_records').add({
@@ -16,19 +17,19 @@ class HealthRecordService {
       'bloodPressure': bloodPressure,
       'weight': weight,
       'hemoglobin': hemoglobin,
+      'symptoms': symptoms, // NEW
       'recordedAt': FieldValue.serverTimestamp(),
       'notes': notes ?? '',
     });
   }
 
   // Get all health records for a patient.
-  Stream<QuerySnapshot<Map<String, dynamic>>> getHealthRecords(
+  Stream<QuerySnapshot> getHealthRecords(
     String userId,
   ) {
     return _firestore
         .collection('health_records')
         .where('userId', isEqualTo: userId)
-      
         .snapshots();
   }
 
