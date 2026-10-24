@@ -1,0 +1,131 @@
+﻿rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userRole() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data.role;
+    }
+
+    function isAsha() {
+      return signedIn() && userRole() == 'asha';
+    }
+
+    function isPatient() {
+      return signedIn() && userRole() == 'patient';
+    }
+
+    function canAccessMother(motherId) {
+      let mother = get(
+        /databases/$(database)/documents/mothers/$(motherId)
+      ).data;
+
+      return signedIn() &&
+        (
+          mother.patientUid == request.auth.uid ||
+          mother.assignedAshaId == request.auth.uid ||
+          motherId == request.auth.uid
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) ||
+        (isAsha() && resource.data.role == 'patient');
+
+      // Users may create only their own patient profile.
+      // ASHA profiles must be provisioned by an administrator.
+      allow create: if isSelf(uid) &&
+        request.resource.data.role == 'patient' &&
+        request.resource.data.id == uid;
+
+      // A user cannot change their own role.
+      allow update: if isSelf(uid) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.id == resource.data.id;
+
+      allow delete: if false;
+    }
+
+    match /mothers/{motherId} {
+      allow read: if canAccessMother(motherId);
+
+      // An ASHA can register a mother assigned to herself.
+      allow create: if isAsha() &&
+        request.resource.data.assignedAshaId == request.auth.uid &&
+        request.resource.data.id == motherId;
+
+      // Patients may update their own limited contact information.
+      // Clinical fields and ASHA assignments cannot be changed here.
+      allow update: if isPatient() &&
+        canAccessMother(motherId) &&
+        request.resource.data.patientUid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['phone', 'emergencyContact']);
+
+      allow delete: if false;
+    }
+
+    match /health_records/{recordId} {
+      allow read: if (
+        resource.data.motherId is string &&
+        canAccessMother(resource.data.motherId)
+      ) || (
+        signedIn() &&
+        resource.data.userId == request.auth.uid
+      );
+
+      // Health records are created by the assigned ASHA.
+      allow create: if isAsha() &&
+        request.resource.data.motherId is string &&
+        canAccessMother(request.resource.data.motherId) &&
+        request.resource.data.id == recordId;
+
+      // Historical clinical records are immutable from the client.
+      allow update, delete: if false;
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if (
+        resource.data.motherId is string &&
+        canAccessMother(resource.data.motherId)
+      ) || (
+        signedIn() &&
+        resource.data.userId == request.auth.uid
+      );
+
+      allow create: if isAsha() &&
+        request.resource.data.motherId is string &&
+        canAccessMother(request.resource.data.motherId) &&
+        request.resource.data.id == appointmentId;
+
+      allow update, delete: if false;
+    }
+
+    match /alerts/{alertId} {
+      allow read: if (
+        resource.data.motherId is string &&
+        canAccessMother(resource.data.motherId)
+      ) || (
+        signedIn() &&
+        resource.data.userId == request.auth.uid
+      );
+
+      allow create: if isAsha() &&
+        request.resource.data.motherId is string &&
+        canAccessMother(request.resource.data.motherId) &&
+        request.resource.data.id == alertId;
+
+      allow update, delete: if false;
+    }
+  }
+}

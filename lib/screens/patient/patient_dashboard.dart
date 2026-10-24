@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
 import '../ai/ai_risk_screen.dart';
+import '../ai/amma_chat_screen.dart';
 import '../../services/alert_service.dart';
 import '../../services/appointment_service.dart';
 import '../../services/auth_service.dart';
@@ -21,9 +21,7 @@ class PatientDashboard extends StatelessWidget {
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
     );
   }
@@ -34,9 +32,7 @@ class PatientDashboard extends StatelessWidget {
 
     if (user == null) {
       return const Scaffold(
-        body: Center(
-          child: Text('No authenticated user found.'),
-        ),
+        body: Center(child: Text('No authenticated user found.')),
       );
     }
 
@@ -54,11 +50,8 @@ class PatientDashboard extends StatelessWidget {
       body: FutureBuilder<Map<String, dynamic>?>(
         future: FirestoreService().getMother(user.uid),
         builder: (context, motherSnapshot) {
-          if (motherSnapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+          if (motherSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (motherSnapshot.hasError) {
@@ -86,10 +79,7 @@ class PatientDashboard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.pregnant_woman,
-                  size: 70,
-                ),
+                const Icon(Icons.pregnant_woman, size: 70),
 
                 const SizedBox(height: 16),
 
@@ -136,13 +126,13 @@ class PatientDashboard extends StatelessWidget {
                   height: 58,
                   child: ElevatedButton.icon(
                     onPressed: () {
+                      final pregnancyWeek =
+                          (mother['pregnancyWeek'] as num?)?.toInt() ?? 0;
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => AiRiskScreen(
-                            pregnancyWeek:
-                                mother['pregnancyWeek'] ?? 0,
-                          ),
+                          builder: (_) =>
+                              AiRiskScreen(pregnancyWeek: pregnancyWeek),
                         ),
                       );
                     },
@@ -157,40 +147,55 @@ class PatientDashboard extends StatelessWidget {
                   ),
                 ),
 
+                const SizedBox(height: 16),
+
+                // AMMA AI Assistant
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AmmaChatScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.chat),
+                    label: const Text(
+                      'AMMA AI ASSISTANT',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+
                 const SizedBox(height: 24),
 
                 // Maternal profile
                 const Text(
                   'My Pregnancy',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 10),
 
                 Card(
                   child: ListTile(
-                    leading: const Icon(
-                      Icons.pregnant_woman,
-                    ),
+                    leading: const Icon(Icons.pregnant_woman),
                     title: const Text('Pregnancy Week'),
-                    subtitle: Text(
-                      'Week ${mother['pregnancyWeek']}',
-                    ),
+                    subtitle: Text('Week ${mother['pregnancyWeek']}'),
                   ),
                 ),
 
                 Card(
                   child: ListTile(
-                    leading: const Icon(
-                      Icons.info_outline,
-                    ),
+                    leading: const Icon(Icons.info_outline),
                     title: const Text('Status'),
-                    subtitle: Text(
-                      '${mother['status']}',
-                    ),
+                    subtitle: Text('${mother['status']}'),
                   ),
                 ),
 
@@ -199,27 +204,19 @@ class PatientDashboard extends StatelessWidget {
                 // Health records
                 const Text(
                   'Health Records',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 10),
 
-                StreamBuilder<
-                    QuerySnapshot<Map<String, dynamic>>>(
-                  stream: HealthRecordService()
-                      .getHealthRecords(user.uid),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: HealthRecordService().getHealthRecords(user.uid),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Center(
-                            child: CircularProgressIndicator(),
-                          ),
+                          child: Center(child: CircularProgressIndicator()),
                         ),
                       );
                     }
@@ -228,9 +225,7 @@ class PatientDashboard extends StatelessWidget {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Unable to load health records.',
-                          ),
+                          child: Text('Unable to load health records.'),
                         ),
                       );
                     }
@@ -241,9 +236,7 @@ class PatientDashboard extends StatelessWidget {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'No health records found.',
-                          ),
+                          child: Text('No health records found.'),
                         ),
                       );
                     }
@@ -254,9 +247,7 @@ class PatientDashboard extends StatelessWidget {
 
                         return Card(
                           child: ListTile(
-                            leading: const Icon(
-                              Icons.health_and_safety,
-                            ),
+                            leading: const Icon(Icons.health_and_safety),
                             title: Text(
                               'Blood Pressure: '
                               '${data['bloodPressure']}',
@@ -280,27 +271,19 @@ class PatientDashboard extends StatelessWidget {
                 // Appointments
                 const Text(
                   'Appointments',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 10),
 
-                StreamBuilder<
-                    QuerySnapshot<Map<String, dynamic>>>(
-                  stream: AppointmentService()
-                      .getAppointments(user.uid),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: AppointmentService().getAppointments(user.uid),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Center(
-                            child: CircularProgressIndicator(),
-                          ),
+                          child: Center(child: CircularProgressIndicator()),
                         ),
                       );
                     }
@@ -309,48 +292,39 @@ class PatientDashboard extends StatelessWidget {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Unable to load appointments.',
-                          ),
+                          child: Text('Unable to load appointments.'),
                         ),
                       );
                     }
 
-                    final appointments =
-                        snapshot.data?.docs ?? [];
+                    final appointments = snapshot.data?.docs ?? [];
 
                     if (appointments.isEmpty) {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'No appointments found.',
-                          ),
+                          child: Text('No appointments found.'),
                         ),
                       );
                     }
 
                     return Column(
-                      children:
-                          appointments.map((appointment) {
+                      children: appointments.map((appointment) {
                         final data = appointment.data();
 
-                        final timestamp =
-                            data['date'] as Timestamp?;
+                        final timestamp = data['date'] as Timestamp?;
 
                         final date = timestamp?.toDate();
 
                         final formattedDate = date == null
                             ? 'Date not available'
                             : '${date.day}/'
-                                '${date.month}/'
-                                '${date.year}';
+                                  '${date.month}/'
+                                  '${date.year}';
 
                         return Card(
                           child: ListTile(
-                            leading: const Icon(
-                              Icons.calendar_month,
-                            ),
+                            leading: const Icon(Icons.calendar_month),
                             title: Text(
                               '${data['title']}',
                               style: const TextStyle(
@@ -376,26 +350,19 @@ class PatientDashboard extends StatelessWidget {
                 // Alerts
                 const Text(
                   'Alerts',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 10),
 
-                StreamBuilder<
-                    QuerySnapshot<Map<String, dynamic>>>(
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: AlertService().getAlerts(user.uid),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Center(
-                            child: CircularProgressIndicator(),
-                          ),
+                          child: Center(child: CircularProgressIndicator()),
                         ),
                       );
                     }
@@ -404,9 +371,7 @@ class PatientDashboard extends StatelessWidget {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Unable to load alerts.',
-                          ),
+                          child: Text('Unable to load alerts.'),
                         ),
                       );
                     }
@@ -417,9 +382,7 @@ class PatientDashboard extends StatelessWidget {
                       return const Card(
                         child: Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text(
-                            'No alerts at the moment.',
-                          ),
+                          child: Text('No alerts at the moment.'),
                         ),
                       );
                     }
@@ -428,8 +391,7 @@ class PatientDashboard extends StatelessWidget {
                       children: alerts.map((alert) {
                         final data = alert.data();
 
-                        final isRead =
-                            data['isRead'] == true;
+                        final isRead = data['isRead'] == true;
 
                         return Card(
                           child: ListTile(
@@ -446,19 +408,13 @@ class PatientDashboard extends StatelessWidget {
                                     : FontWeight.bold,
                               ),
                             ),
-                            subtitle: Text(
-                              '${data['message']}',
-                            ),
+                            subtitle: Text('${data['message']}'),
                             trailing: isRead
                                 ? null
-                                : const Icon(
-                                    Icons.circle,
-                                    size: 10,
-                                  ),
+                                : const Icon(Icons.circle, size: 10),
                             onTap: () async {
                               if (!isRead) {
-                                await AlertService()
-                                    .markAsRead(alert.id);
+                                await AlertService().markAsRead(alert.id);
                               }
                             },
                           ),
@@ -472,9 +428,7 @@ class PatientDashboard extends StatelessWidget {
 
                 Text(
                   'Patient ID: ${user.uid}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(fontSize: 12),
                 ),
               ],
             ),

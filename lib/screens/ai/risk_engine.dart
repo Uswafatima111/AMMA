@@ -63,6 +63,19 @@ class RiskEngine {
       if (normalized.contains('severe headache')) {
         score += 30;
         matchedRules.add('Severe headache reported');
+      } else if (normalized.contains('headache')) {
+        score += 20;
+        matchedRules.add('Headache reported');
+      }
+
+      if (normalized.contains('swelling')) {
+        score += 20;
+        matchedRules.add('Swelling reported');
+      }
+
+      if (normalized.contains('fever')) {
+        score += 15;
+        matchedRules.add('Fever reported');
       }
 
       if (normalized.contains('blurred vision')) {
@@ -87,6 +100,7 @@ class RiskEngine {
       }
     }
 
+    // Keep the score within the supported range.
     score = score.clamp(0, 100);
 
     final riskLevel = _getRiskLevel(score);
@@ -95,18 +109,14 @@ class RiskEngine {
       matchedRules.add('No major risk indicators detected');
     }
 
-    final explanation = _buildExplanation(
-      riskLevel,
-      score,
-      matchedRules,
-    );
+    final explanation = _buildExplanation(riskLevel, score, matchedRules);
 
     return RiskResult(
       riskLevel: riskLevel,
       matchedRules: matchedRules,
       explanation: explanation,
       recommendation: _recommendation(riskLevel),
-      ruleVersion: 'v1.0',
+      ruleVersion: 'v1.1',
       timestamp: DateTime.now(),
     );
   }

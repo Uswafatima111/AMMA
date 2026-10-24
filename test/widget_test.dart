@@ -1,30 +1,42 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:amma/main.dart';
+import 'package:amma/ai/amma_ai_service.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('AMMA AI service smoke tests', () {
+    late AmmaAiService service;
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    setUp(() {
+      service = AmmaAiService();
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('returns a prompt for empty input', () {
+      final result = service.ask('');
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+      expect(result.answer, 'Please enter a question.');
+      expect(result.isGrounded, isFalse);
+    });
+
+    test('detects an emergency phrase', () {
+      final result = service.ask('I have heavy bleeding');
+
+      expect(result.intent, AmmaIntent.emergency);
+      expect(result.requiresUrgentCare, isTrue);
+    });
+
+    test('retrieves supported maternal-health information', () {
+      final result = service.ask(
+        'Tell me about blood pressure during pregnancy',
+      );
+
+      expect(result.intent, AmmaIntent.maternalHealthQuestion);
+      expect(result.sources, isNotEmpty);
+    });
+
+    test('rejects an unrelated question', () {
+      final result = service.ask('How do I repair a car engine?');
+
+      expect(result.intent, AmmaIntent.unsupported);
+      expect(result.isGrounded, isFalse);
+    });
   });
 }
