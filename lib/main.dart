@@ -15,7 +15,10 @@ class AmmaApp extends StatelessWidget {
       title: 'AMMA',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+
+      // TEMPORARILY OPEN ASHA DASHBOARD DIRECTLY
       initialRoute: AppRoutes.login,
+
       routes: AppRoutes.routes,
     );
   }

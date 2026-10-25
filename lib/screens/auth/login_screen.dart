@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     // MOCK: change to UserRole.patient to test the other flow.
-    const mockRole = UserRole.asha;
+    const mockRole = UserRole.patient;
 
     if (!mounted) return;
     if (mockRole == UserRole.asha) {

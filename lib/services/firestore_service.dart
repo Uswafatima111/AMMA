@@ -1,5 +1,8 @@
+
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 class FirestoreService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
 
   // Get a mother's profile.
   Future<Map<String, dynamic>?> getMother(String userId) async {

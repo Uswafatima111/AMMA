@@ -4,6 +4,7 @@ import '../../core/theme/app_theme.dart';
 import '../../models/mother_model.dart';
 import '../../core/constants/app_enums.dart';
 import '../../services/firestore_service.dart';
+import '../../services/local_mother_store.dart';
 
 class RegisterMotherScreen extends StatefulWidget {
   const RegisterMotherScreen({super.key});
@@ -40,6 +41,9 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
 
   final userId = DateTime.now().millisecondsSinceEpoch.toString(); // TODO: replace once Uswa confirms real ID strategy (auto-ID vs matching auth uid)
 
+  // Try to save to Firestore, but don't let a failure block registration —
+  // TEMPORARY while Firebase isn't running locally. Revert once Firebase
+  // is confirmed working so a failed save is surfaced to the user again.
   try {
     await FirestoreService().createMother(
       userId: userId,
@@ -47,39 +51,36 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
       pregnancyWeek: int.tryParse(_gestationalWeeksController.text.trim()) ?? 0,
       status: 'active', // TODO: confirm what values `status` expects with Uswa
     );
-
-    // BACKEND INTEGRATION REQUIRED FROM USWA — vitals below have no home yet:
-    // age, phone, bloodPressure, weight, hemoglobin, symptoms, emergencyContact
-    // are collected here but NOT saved anywhere until createMother() is
-    // expanded, or we're told to route them through addHealthRecord() instead.
-
-    if (!mounted) return;
-
-    final newMother = MotherModel(
-      id: userId,
-      name: _nameController.text.trim(),
-      age: int.tryParse(_ageController.text.trim()) ?? 0,
-      phone: _phoneController.text.trim(),
-      gestationalWeeks: int.tryParse(_gestationalWeeksController.text.trim()) ?? 0,
-      bloodPressure: _bpController.text.trim(),
-      weight: double.tryParse(_weightController.text.trim()) ?? 0,
-      hemoglobin: double.tryParse(_hemoglobinController.text.trim()) ?? 0,
-      symptoms: _selectedSymptoms.toList(),
-      emergencyContact: _emergencyContactController.text.trim(),
-      riskLevel: RiskLevel.low,
-      assignedAshaId: 'mock-asha-01',
-      createdAt: DateTime.now(),
-    );
-
-    Navigator.pushReplacementNamed(context, '/mother-profile', arguments: newMother);
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Could not register mother: $e')),
-    );
-  } finally {
-    if (mounted) setState(() => _isSaving = false);
+  } catch (_) {
+    // Firebase not available right now — continue locally.
   }
+
+  // BACKEND INTEGRATION REQUIRED FROM USWA — vitals below have no home yet:
+  // age, phone, bloodPressure, weight, hemoglobin, symptoms, emergencyContact
+  // are collected here but NOT saved anywhere until createMother() is
+  // expanded, or we're told to route them through addHealthRecord() instead.
+
+  if (!mounted) return;
+
+  final newMother = MotherModel(
+    id: userId,
+    name: _nameController.text.trim(),
+    age: int.tryParse(_ageController.text.trim()) ?? 0,
+    phone: _phoneController.text.trim(),
+    gestationalWeeks: int.tryParse(_gestationalWeeksController.text.trim()) ?? 0,
+    bloodPressure: _bpController.text.trim(),
+    weight: double.tryParse(_weightController.text.trim()) ?? 0,
+    hemoglobin: double.tryParse(_hemoglobinController.text.trim()) ?? 0,
+    symptoms: _selectedSymptoms.toList(),
+    emergencyContact: _emergencyContactController.text.trim(),
+    riskLevel: RiskLevel.low,
+    assignedAshaId: 'mock-asha-01',
+    createdAt: DateTime.now(),
+  );
+  LocalMotherStore.instance.addMother(newMother);
+  Navigator.pushReplacementNamed(context, '/mother-profile', arguments: newMother);
+
+  if (mounted) setState(() => _isSaving = false);
 }
 
   @override

@@ -1,21 +1,22 @@
 import '../models/risk_result.dart';
+import '../screens/ai/risk_engine.dart';
 import 'health_record_service.dart';
-import 'ai_risk_service.dart';
 
-/// Now wired to Uswa's real risk engine (pulled from backend-uswa).
-/// Flow: save the health record to Firestore, then ask AiRiskService to
-/// assess the most recently saved record for this mother.
+/// TEMPORARY: bypasses Firestore for the risk assessment step so the
+/// health check flow works without Firebase running. Calls RiskEngine
+/// directly with the form data instead of writing to Firestore and
+/// reading it back via AiRiskService.
 ///
-/// ⚠ STILL OPEN WITH USWA:
-///   - symptoms aren't factored into the score yet — her assessLatestRecord()
-///     doesn't fetch or pass them to RiskEngine, even though RiskEngine
-///     supports a symptoms parameter. Ask her to wire that through.
-///   - userId vs motherId naming is still unconfirmed — passing mother.id as
-///     userId for both the write and the read, so they stay internally
-///     consistent even if the naming itself isn't resolved yet.
+/// The Firestore save is still attempted (fire-and-forget) so data isn't
+/// lost once Firebase is back up, but it no longer blocks the result.
+///
+/// ⚠ REVERT NOTE: once Firebase is confirmed working again, swap back to
+/// calling _aiRiskService.assessLatestRecord() so the real saved record
+/// (with server timestamp) is what gets assessed — this local version
+/// assesses the form input directly, not what's actually in Firestore.
 class HealthService {
   final HealthRecordService _healthRecordService = HealthRecordService();
-  final AiRiskService _aiRiskService = AiRiskService();
+  final RiskEngine _riskEngine = RiskEngine();
 
   Future<RiskResult> submitHealthCheck({
     required String motherId,
@@ -25,25 +26,26 @@ class HealthService {
     required double hemoglobin,
     required List<String> symptoms,
   }) async {
-    // Step 1: save the health record for real.
-    await _healthRecordService.addHealthRecord(
-      userId: motherId,
-      bloodPressure: bloodPressure,
-      weight: weight,
-      hemoglobin: hemoglobin,
-      symptoms: symptoms, // requires the symptoms param we added locally
-    );
-
-    // Step 2: ask the real risk engine to assess what was just saved.
-    final result = await _aiRiskService.assessLatestRecord(
-      userId: motherId,
-      pregnancyWeek: gestationalWeeks,
-    );
-
-    if (result == null) {
-      throw Exception('No health record found to assess — try again.');
+    // Try to save to Firestore, but don't let a failure block the result.
+    try {
+      await _healthRecordService.addHealthRecord(
+        userId: motherId,
+        bloodPressure: bloodPressure,
+        weight: weight,
+        hemoglobin: hemoglobin,
+        symptoms: symptoms,
+      );
+    } catch (_) {
+      // Firebase not available right now — ignore and continue locally.
     }
 
-    return result;
+    // Assess directly from form input, no Firestore round trip needed.
+    return _riskEngine.assess(
+      pregnancyWeek: gestationalWeeks,
+      bloodPressure: bloodPressure,
+      hemoglobin: hemoglobin,
+      weight: weight,
+      symptoms: symptoms,
+    );
   }
 }

@@ -1,8 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HealthRecordService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   // Add a health record for a patient.
   Future<void> addHealthRecord({
     required String userId,

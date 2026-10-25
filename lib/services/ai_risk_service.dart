@@ -3,7 +3,7 @@ import '../models/risk_result.dart';
 import '../screens/ai/risk_engine.dart';
 
 class AiRiskService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
   final RiskEngine _riskEngine = RiskEngine();
 
   Future<RiskResult?> assessLatestRecord({
