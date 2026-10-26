@@ -1,125 +1,228 @@
-import '../../core/constants/app_enums.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
 import '../../models/risk_result.dart';
+import '../../services/ai_risk_service.dart';
 
-class RiskEngine {
-  RiskResult assess({
-    required int pregnancyWeek,
-    required String bloodPressure,
-    required double hemoglobin,
-    required double weight,
-    List<String> symptoms = const [],
-  }) {
-    int score = 0;
-    final matchedRules = <String>[];
+class AiRiskScreen extends StatelessWidget {
+  const AiRiskScreen({
+    super.key,
+    required this.pregnancyWeek,
+  });
 
-    final bpParts = bloodPressure.split('/');
-    if (bpParts.length == 2) {
-      final systolic = int.tryParse(bpParts[0].trim());
-      final diastolic = int.tryParse(bpParts[1].trim());
-      if (systolic != null && diastolic != null) {
-        if (systolic >= 160 || diastolic >= 110) {
-          score += 50;
-          matchedRules.add('Severely elevated blood pressure');
-        } else if (systolic >= 140 || diastolic >= 90) {
-          score += 35;
-          matchedRules.add('Elevated blood pressure');
-        } else if (systolic >= 130 || diastolic >= 80) {
-          score += 15;
-          matchedRules.add('Blood pressure above target range');
-        }
-      }
+  final int pregnancyWeek;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text(
+            'No authenticated patient found.',
+          ),
+        ),
+      );
     }
 
-    if (hemoglobin < 7) {
-      score += 40;
-      matchedRules.add('Severely low hemoglobin');
-    } else if (hemoglobin < 10) {
-      score += 25;
-      matchedRules.add('Low hemoglobin');
-    } else if (hemoglobin < 11) {
-      score += 10;
-      matchedRules.add('Mildly low hemoglobin');
-    }
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('AMMA AI Risk Assessment'),
+      ),
+      body: FutureBuilder<RiskResult?>(
+        future: AiRiskService().assessLatestRecord(
+          userId: user.uid,
+          pregnancyWeek: pregnancyWeek,
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState ==
+              ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
 
-    if (pregnancyWeek < 1 || pregnancyWeek > 42) {
-      score += 20;
-      matchedRules.add('Pregnancy week outside expected range');
-    }
+          if (snapshot.hasError) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Unable to perform the AI risk assessment.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
 
-    for (final symptom in symptoms) {
-      final normalized = symptom.toLowerCase().trim();
+          final result = snapshot.data;
 
-      if (normalized.contains('bleeding')) {
-        score += 40;
-        matchedRules.add('Bleeding reported');
-      }
-      if (normalized.contains('headache')) {
-        score += 20;
-        matchedRules.add('Headache reported');
-      }
-      if (normalized.contains('swelling')) {
-        score += 20;
-        matchedRules.add('Swelling reported');
-      }
-      if (normalized.contains('fever')) {
-        score += 15;
-        matchedRules.add('Fever reported');
-      }
-      if (normalized.contains('blurred vision')) {
-        score += 30;
-        matchedRules.add('Vision changes reported');
-      }
-      if (normalized.contains('chest pain')) {
-        score += 40;
-        matchedRules.add('Chest pain reported');
-      }
-      if (normalized.contains('breathing difficulty') ||
-          normalized.contains('shortness of breath')) {
-        score += 40;
-        matchedRules.add('Breathing difficulty reported');
-      }
-      if (normalized.contains('severe abdominal pain')) {
-        score += 35;
-        matchedRules.add('Severe abdominal pain reported');
-      }
-    }
+          if (result == null) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'No health records are available yet. '
+                  'Add a health record to perform an assessment.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 17),
+                ),
+              ),
+            );
+          }
 
-    score = score.clamp(0, 100);
-    final riskLevel = _getRiskLevel(score);
-
-    if (matchedRules.isEmpty) {
-      matchedRules.add('No major risk indicators detected');
-    }
-
-    return RiskResult(
-      riskLevel: riskLevel,
-      matchedRules: matchedRules,
-      explanation: _buildExplanation(riskLevel, score, matchedRules),
-      recommendation: _recommendation(riskLevel),
-      ruleVersion: 'v1.0',
-      timestamp: DateTime.now(),
+          return _RiskResultView(result: result);
+        },
+      ),
     );
   }
+}
 
-  RiskLevel _getRiskLevel(int score) {
-    if (score >= 45) return RiskLevel.high;
-    if (score >= 20) return RiskLevel.moderate;
-    return RiskLevel.low;
-  }
+class _RiskResultView extends StatelessWidget {
+  const _RiskResultView({
+    required this.result,
+  });
 
-  String _buildExplanation(RiskLevel riskLevel, int score, List<String> matchedRules) {
-    return 'Risk assessment: ${riskLevel.name} (score $score/100). '
-        'The assessment was influenced by: ${matchedRules.join(', ')}.';
-  }
+  final RiskResult result;
 
-  String _recommendation(RiskLevel riskLevel) {
-    switch (riskLevel) {
-      case RiskLevel.high:
-        return 'Contact the healthcare team promptly for further assessment.';
-      case RiskLevel.moderate:
-        return 'Continue monitoring and discuss the findings with the healthcare team.';
-      case RiskLevel.low:
-        return 'Continue routine maternal monitoring and scheduled care.';
-    }
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AMMA AI',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          const Text(
+            'Maternal Risk Assessment',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          const Text(
+            'Assessment generated from the latest '
+            'health information stored in the patient record.',
+          ),
+
+          const SizedBox(height: 24),
+
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Risk Level',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
+                    result.riskLevel.name.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Assessment',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(result.explanation),
+
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Detected Factors',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  ...result.matchedRules.map(
+                    (rule) => Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          const Text('• '),
+                          Expanded(
+                            child: Text(rule),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Recommended Next Step',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(result.recommendation),
+
+                  const SizedBox(height: 20),
+
+                  Text(
+                    'Rule version: ${result.ruleVersion}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          const Text(
+            'Important: This assessment is a decision-support '
+            'feature and does not replace professional medical '
+            'evaluation.',
+            style: TextStyle(
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

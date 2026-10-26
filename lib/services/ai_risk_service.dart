@@ -1,45 +1,77 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../models/risk_result.dart';
 import '../screens/ai/risk_engine.dart';
 
 class AiRiskService {
-  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   final RiskEngine _riskEngine = RiskEngine();
 
+  /// Assesses the newest available health record.
+  ///
+  /// Existing callers can continue passing userId.
+  /// New callers should pass motherId.
   Future<RiskResult?> assessLatestRecord({
-    required String userId,
+    String? userId,
+    String? motherId,
     required int pregnancyWeek,
   }) async {
-    final snapshot = await _firestore
-        .collection('health_records')
-        .where('userId', isEqualTo: userId)
-        .get();
+    final resolvedId = motherId?.trim().isNotEmpty == true
+        ? motherId!.trim()
+        : userId?.trim();
 
-    if (snapshot.docs.isEmpty) return null;
+    if (resolvedId == null || resolvedId.isEmpty) {
+      throw ArgumentError('A motherId or legacy userId is required.');
+    }
 
-    QueryDocumentSnapshot<Map<String, dynamic>> latest = snapshot.docs.first;
-    for (final document in snapshot.docs.skip(1)) {
-      final latestTimestamp = latest.data()['recordedAt'];
-      final currentTimestamp = document.data()['recordedAt'];
-      if (currentTimestamp is Timestamp &&
-          (latestTimestamp is! Timestamp || currentTimestamp.compareTo(latestTimestamp) > 0)) {
-        latest = document;
+    final collection = _firestore.collection('health_records');
+
+    final results = await Future.wait([
+      collection.where('motherId', isEqualTo: resolvedId).get(),
+      collection.where('userId', isEqualTo: resolvedId).get(),
+    ]);
+
+    // Merge results and remove duplicates by document ID.
+    final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+
+    for (final snapshot in results) {
+      for (final document in snapshot.docs) {
+        documents[document.id] = document;
       }
     }
 
-    final data = latest.data();
+    if (documents.isEmpty) return null;
+
+    int timestampMillis(Map<String, dynamic> data) {
+      final value = data['date'] ?? data['recordedAt'];
+      return value is Timestamp ? value.millisecondsSinceEpoch : 0;
+    }
+
+    final ordered = documents.values.toList()
+      ..sort(
+        (a, b) =>
+            timestampMillis(b.data()).compareTo(timestampMillis(a.data())),
+      );
+
+    final data = ordered.first.data();
+
     final bloodPressure = data['bloodPressure']?.toString() ?? '';
+
     final weightValue = data['weight'];
     final hemoglobinValue = data['hemoglobin'];
 
-    final weight = weightValue is num ? weightValue.toDouble() : double.tryParse(weightValue?.toString() ?? '') ?? 0;
-    final hemoglobin = hemoglobinValue is num ? hemoglobinValue.toDouble() : double.tryParse(hemoglobinValue?.toString() ?? '') ?? 0;
+    final weight = weightValue is num
+        ? weightValue.toDouble()
+        : double.tryParse(weightValue?.toString() ?? '') ?? 0;
 
-    // FIX: symptoms weren't being read from Firestore or passed to the
-    // engine before — this is the one-line fix for the demo.
-    final symptomsValue = data['symptoms'];
-    final symptoms = symptomsValue is List
-        ? symptomsValue.map((s) => s.toString()).toList()
+    final hemoglobin = hemoglobinValue is num
+        ? hemoglobinValue.toDouble()
+        : double.tryParse(hemoglobinValue?.toString() ?? '') ?? 0;
+
+    final rawSymptoms = data['symptoms'];
+    final symptoms = rawSymptoms is List
+        ? rawSymptoms.map((item) => item.toString()).toList()
         : <String>[];
 
     return _riskEngine.assess(
@@ -47,7 +79,7 @@ class AiRiskService {
       bloodPressure: bloodPressure,
       hemoglobin: hemoglobin,
       weight: weight,
-      symptoms: symptoms, // <- the actual fix
+      symptoms: symptoms,
     );
   }
 }
