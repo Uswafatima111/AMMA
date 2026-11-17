@@ -9,9 +9,11 @@ import '../../screens/maternal/register_mother_screen.dart';
 import '../../screens/maternal/mother_profile_screen.dart';
 import '../../screens/health_check/health_check_screen.dart';
 import '../../screens/risk/risk_result_screen.dart';
+import '../../screens/ai/amma_chat_screen.dart';
 import '../../models/mother_model.dart';
 import '../../models/risk_result.dart';
 import '../../data/benefits_data.dart';
+
 
 class AppRoutes {
   static const String login = '/login';
@@ -24,6 +26,8 @@ class AppRoutes {
   static const String riskResult = '/risk-result';
   static const String benefits = '/benefits';
   static const String benefitDetail = '/benefit-detail';
+  static const String ammaChat = '/amma-chat';
+  
 
   static Map<String, WidgetBuilder> get routes {
     return {
@@ -33,9 +37,7 @@ class AppRoutes {
       registerMother: (context) => const RegisterMotherScreen(),
       mothersList: (context) => const MothersListScreen(),
       benefits: (context) => const BenefitsScreen(),
-
-      // These routes read the arguments passed via
-      // Navigator.pushNamed(..., arguments: ...).
+      ammaChat: (context) => const AmmaChatScreen(),
       motherProfile: (context) {
         final mother =
             ModalRoute.of(context)!.settings.arguments as MotherModel?;

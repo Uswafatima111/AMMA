@@ -17,7 +17,7 @@ class _AmmaChatScreenState extends State<AmmaChatScreen> {
   final List<_ChatMessage> _messages = [
     const _ChatMessage(
       text:
-          'Assalamu alaikum! I am AMMA, your maternal-health '
+          'Hello! I am AMMA, your maternal-health '
           'information assistant. You can ask me questions about '
           'pregnancy health. I do not replace a healthcare professional.',
       isUser: false,

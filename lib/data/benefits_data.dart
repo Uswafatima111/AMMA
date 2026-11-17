@@ -45,6 +45,7 @@ const _purple = Color(0xFF7B5EA7);
 const _teal = Color(0xFF0D9488);
 
 const String _checked = 'Checked 22 Oct 2026';
+const String _checkedVaccine = 'Checked 27 Oct 2026';
 
 const List<BenefitScheme> kBenefitSchemes = [
   // ---------- CONFIRMED (official sources) ----------
@@ -143,8 +144,64 @@ const List<BenefitScheme> kBenefitSchemes = [
     lastVerified: _checked,
     status: BenefitStatus.confirmed,
   ),
+  // NEW: free baby vaccines (Universal Immunisation Programme)
+  BenefitScheme(
+    id: 'uip_vaccines',
+    title: 'Free vaccines for your baby',
+    summary: 'Free at government health centres, from the day your baby is born',
+    icon: Icons.vaccines_outlined,
+    color: _blue,
+    whatYouGet: [
+      'Free vaccines that protect your baby from serious illness',
+      'At birth: BCG, hepatitis B and polio drops',
+      'More vaccines when the baby is 6, 10 and 14 weeks old',
+      'More vaccines at 9 months',
+      'A vaccination card that records every vaccine',
+    ],
+    whoCanGet:
+        'Every baby. Vaccines are free at government health centres and hospitals.',
+    howToGet: [
+      'Get the first vaccines at the hospital where your baby is born',
+      'Take your baby to the health centre or Anganwadi vaccination day for the next ones',
+      'Ask your ASHA when the next vaccine is due',
+      'Keep the vaccination card safe and bring it every time',
+    ],
+    documents: [
+      'Mother and Child Protection (MCP) card or baby vaccination card',
+    ],
+    officialUrl:
+        'https://mohfw.gov.in/sites/default/files/41016395871489662752.pdf',
+    source: 'Ministry of Health & Family Welfare (Universal Immunisation Programme)',
+    lastVerified: _checkedVaccine,
+    status: BenefitStatus.confirmed,
+  ),
 
   // ---------- CHECK WITH ASHA (not confirmed from official sources) ----------
+  // NEW: registering the baby on U-WIN. Not confirmed live in every centre.
+  BenefitScheme(
+    id: 'uwin',
+    title: 'Register your baby for vaccines',
+    summary: 'Get vaccine reminders by SMS. Ask your ASHA to register your baby',
+    icon: Icons.how_to_reg_outlined,
+    color: _blue,
+    whatYouGet: [
+      'Your baby\'s vaccines are recorded online',
+      'SMS reminders before the next vaccine is due',
+      'A vaccination certificate',
+    ],
+    whoCanGet:
+        'Babies, and pregnant women, who get vaccines under the government programme. Not every centre may use this yet. Ask your ASHA.',
+    howToGet: [
+      'Ask your ASHA or the health centre to register your baby',
+      'Keep your mobile number ready for SMS reminders',
+      'You can also be registered on the day of a vaccination session',
+    ],
+    documents: ['Mobile number', 'Mother and Child Protection (MCP) card'],
+    source:
+        'U-WIN digital vaccine record (details from news reports. Please confirm)',
+    lastVerified: _checkedVaccine,
+    status: BenefitStatus.checkWithAsha,
+  ),
   BenefitScheme(
     id: 'jsy',
     title: 'Cash for hospital delivery',

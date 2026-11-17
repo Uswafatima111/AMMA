@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart' show RiskColors;
 import '../../core/theme/patient_palette.dart';
 import '../../core/utils/pregnancy_utils.dart';
 import '../../widgets/video_slot.dart';
+import '../../widgets/dev_switch_button.dart';
 
 class _VideoEntry {
   final String title;
@@ -41,6 +42,31 @@ class PatientDashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: PatientPalette.cream,
+      // CHANGED: DEV switch button (debug only) above the "Ask AMMA" button
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          const DevSwitchButton(
+            targetRoute: '/asha-dashboard',
+            label: 'DEV: switch to ASHA',
+          ),
+          FloatingActionButton.extended(
+            heroTag: 'askAmma',
+            onPressed: () => Navigator.pushNamed(context, '/amma-chat'),
+            backgroundColor: PatientPalette.gold,
+            foregroundColor: PatientPalette.navyDeep,
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: Text(
+              'Ask AMMA',
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
       body: ListView(
         padding: EdgeInsets.zero,
         children: [
@@ -55,7 +81,8 @@ class PatientDashboardScreen extends StatelessWidget {
             const _NearTermBanner(),
           const _EmergencyStrip(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            // Bottom padding so the floating buttons don't cover the last card
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 96),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

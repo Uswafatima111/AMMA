@@ -2,11 +2,27 @@ import '../models/risk_result.dart';
 import '../screens/ai/risk_engine.dart';
 import 'health_record_service.dart';
 
-/// Assesses with Uswa's RiskEngine, then saves the health record
-/// together with the result. The clinical rules stay in RiskEngine.
+/// Coordinates Uswa's RiskEngine and HealthRecordService.
+/// The clinical rules stay in RiskEngine.
 class HealthService {
   final HealthRecordService _records = HealthRecordService();
   final RiskEngine _engine = RiskEngine();
+
+  RiskResult assess({
+    required int pregnancyWeek,
+    required String bloodPressure,
+    required double hemoglobin,
+    required double weight,
+    required List<String> symptoms,
+  }) {
+    return _engine.assess(
+      pregnancyWeek: pregnancyWeek,
+      bloodPressure: bloodPressure,
+      hemoglobin: hemoglobin,
+      weight: weight,
+      symptoms: symptoms,
+    );
+  }
 
   Future<RiskResult> submitHealthCheck({
     required String motherId,
@@ -16,7 +32,7 @@ class HealthService {
     required double hemoglobin,
     required List<String> symptoms,
   }) async {
-    final result = _engine.assess(
+    final result = assess(
       pregnancyWeek: gestationalWeeks,
       bloodPressure: bloodPressure,
       hemoglobin: hemoglobin,
@@ -38,8 +54,7 @@ class HealthService {
     );
 
     // TODO: BACKEND INTEGRATION REQUIRED FROM USWA
-    // updateMotherRiskLevel(motherId, riskLevel) on the mothers collection,
-    // otherwise mothers.riskLevel stays 'low'.
+    // updateMotherRiskLevel(motherId, riskLevel) on the mothers collection.
 
     return result;
   }

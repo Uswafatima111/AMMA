@@ -1,307 +1,288 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_theme.dart';
-import '../../models/mother_model.dart';
 import '../../core/constants/app_enums.dart';
-import '../../services/local_mother_store.dart';
+import '../../core/theme/app_theme.dart';
+import '../../data/mother_mapper.dart';
+import '../../models/mother_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
+import '../../widgets/dev_switch_button.dart';
 
-class AshaDashboardScreen extends StatefulWidget {
+class AshaDashboardScreen extends StatelessWidget {
   const AshaDashboardScreen({super.key});
-
-  static const String workerName = 'Kavya';
-  static const bool isOnline = true;
-
-  @override
-  State<AshaDashboardScreen> createState() => _AshaDashboardScreenState();
-}
-
-class _AshaDashboardScreenState extends State<AshaDashboardScreen> {
-  List<MotherModel> get _mothers => LocalMotherStore.instance.mothers;
 
   @override
   Widget build(BuildContext context) {
-    final mothers = _mothers;
-    final attentionMothers = mothers.where((m) => m.riskLevel != RiskLevel.low).toList();
-    final lowCount = mothers.where((m) => m.riskLevel == RiskLevel.low).length;
-    final moderateCount = mothers.where((m) => m.riskLevel == RiskLevel.moderate).length;
-    final highCount = mothers.where((m) => m.riskLevel == RiskLevel.high).length;
+    // CHANGED: in debug builds, fall back to a placeholder id so the
+    // dashboard opens even when nobody is signed in (dev switch button).
+    final uid = AuthService().currentUser?.uid ??
+        (kDebugMode ? 'dev-preview' : null);
 
     return Theme(
       data: AppTheme.ashaTheme,
       child: Scaffold(
         backgroundColor: AshaColors.background,
+        floatingActionButton: const DevSwitchButton(
+          targetRoute: '/patient-dashboard',
+          label: 'DEV: switch to patient',
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _TopBar(
-                  workerName: AshaDashboardScreen.workerName,
-                  isOnline: AshaDashboardScreen.isOnline,
-                ),
+          child: uid == null
+              ? Center(
+                  child: Text('Please log in again',
+                      style: GoogleFonts.inter(color: AshaColors.inkMuted)),
+                )
+              : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirestoreService().getMothersAssignedToAsha(uid),
+                  builder: (context, snapshot) {
+                    final mothers = snapshot.data == null
+                        ? <MotherModel>[]
+                        : snapshot.data!.docs
+                            .map((d) =>
+                                MotherMapper.fromMap(d.data(), id: d.id))
+                            .toList();
+                    final fromCache =
+                        snapshot.data?.metadata.isFromCache ?? true;
 
-                const SizedBox(height: 24),
+                    int count(RiskLevel l) =>
+                        mothers.where((m) => m.riskLevel == l).length;
 
-                TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search mothers by name',
-                    hintStyle:
-                        GoogleFonts.inter(color: AshaColors.inkMuted),
-                    prefixIcon: const Icon(
-                      Icons.search,
-                      color: AshaColors.inkMuted,
-                    ),
-                  ),
-                ),
+                    // Highest risk first, only mothers who are not low risk.
+                    final attention = mothers
+                        .where((m) => m.riskLevel != RiskLevel.low)
+                        .toList()
+                      ..sort((a, b) =>
+                          b.riskLevel.index.compareTo(a.riskLevel.index));
 
-                const SizedBox(height: 24),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatTile(
-                        label: 'Total mothers',
-                        value: '${mothers.length}',
-                        color: AshaColors.ink,
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _TopBar(uid: uid, offline: fromCache),
+                          const SizedBox(height: 24),
+                          if (snapshot.hasError)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Text(
+                                'Could not load mothers: ${snapshot.error}',
+                                style: GoogleFonts.inter(
+                                    color: RiskColors.high, fontSize: 13),
+                              ),
+                            ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _StatTile(
+                                  label: 'Total mothers',
+                                  value: '${mothers.length}',
+                                  color: AshaColors.ink,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _StatTile(
+                                  label: 'Low',
+                                  value: '${count(RiskLevel.low)}',
+                                  color: RiskColors.low,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _StatTile(
+                                  label: 'Moderate',
+                                  value: '${count(RiskLevel.moderate)}',
+                                  color: RiskColors.moderate,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _StatTile(
+                                  label: 'High',
+                                  value: '${count(RiskLevel.high)}',
+                                  color: RiskColors.high,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 28),
+                          ElevatedButton.icon(
+                            onPressed: () => Navigator.pushNamed(
+                                context, '/register-mother'),
+                            icon:
+                                const Icon(Icons.person_add_alt_1, size: 20),
+                            label: const Text('Register mother'),
+                          ),
+                          const SizedBox(height: 28),
+                          Text('Needs attention today',
+                              style:
+                                  Theme.of(context).textTheme.headlineMedium),
+                          const SizedBox(height: 12),
+                          if (attention.isEmpty)
+                            Text(
+                              mothers.isEmpty
+                                  ? 'No mothers registered yet'
+                                  : 'No mothers need attention right now',
+                              style: GoogleFonts.inter(
+                                  color: AshaColors.inkMuted),
+                            )
+                          else
+                            ...attention.take(3).map(
+                                  (m) => _AttentionCard(
+                                    mother: m,
+                                    onTap: () => Navigator.pushNamed(
+                                      context,
+                                      '/mother-profile',
+                                      arguments: m,
+                                    ),
+                                  ),
+                                ),
+                          const SizedBox(height: 28),
+                          Text('Tools',
+                              style:
+                                  Theme.of(context).textTheme.headlineMedium),
+                          const SizedBox(height: 12),
+                          _ToolRow(
+                            icon: Icons.favorite_border,
+                            label: 'Health check',
+                            onTap: () =>
+                                Navigator.pushNamed(context, '/mothers-list'),
+                          ),
+                          _ToolRow(
+                            icon: Icons.groups_outlined,
+                            label: 'My mothers',
+                            onTap: () =>
+                                Navigator.pushNamed(context, '/mothers-list'),
+                          ),
+                          _ToolRow(
+                            icon: Icons.calendar_month_outlined,
+                            label: 'ANC schedule',
+                            onTap: () => _soon(context),
+                          ),
+                          _ToolRow(
+                            icon: Icons.emergency_outlined,
+                            label: 'Emergency',
+                            onTap: () => _soon(context),
+                            isUrgent: true,
+                          ),
+                          _ToolRow(
+                            icon: Icons.smart_toy_outlined,
+                            label: 'Ask AMMA',
+                            onTap: () =>
+                                Navigator.pushNamed(context, '/amma-chat'),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _StatTile(
-                        label: 'Low',
-                        value: '$lowCount',
-                        color: RiskColors.low,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _StatTile(
-                        label: 'Moderate',
-                        value: '$moderateCount',
-                        color: RiskColors.moderate,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _StatTile(
-                        label: 'High',
-                        value: '$highCount',
-                        color: RiskColors.high,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 28),
-
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    await Navigator.pushNamed(context, '/register-mother');
-                    if (mounted) setState(() {});
-                  },
-                  icon: const Icon(
-                    Icons.person_add_alt_1,
-                    size: 20,
-                  ),
-                  label: const Text('Register mother'),
-                ),
-
-                const SizedBox(height: 28),
-
-                Text(
-                  'Needs attention today',
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineMedium,
-                ),
-
-                const SizedBox(height: 12),
-
-                Column(
-                  children: attentionMothers.map((mother) {
-                    String reason;
-
-                    if (mother.riskLevel == RiskLevel.high) {
-                      reason =
-                          '${mother.gestationalWeeks} weeks • High risk';
-                    } else if (mother.riskLevel ==
-                        RiskLevel.moderate) {
-                      reason =
-                          '${mother.gestationalWeeks} weeks • Follow-up needed';
-                    } else {
-                      reason =
-                          '${mother.gestationalWeeks} weeks • Needs a check-in';
-                    }
-
-                    return _AttentionCard(
-                      mother: mother,
-                      reason: reason,
-                      onTap: () async {
-                        await Navigator.pushNamed(
-                          context,
-                          '/mother-profile',
-                          arguments: mother,
-                        );
-                        if (mounted) setState(() {});
-                      },
                     );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 28),
-
-                Text(
-                  'Tools',
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineMedium,
-                ),
-
-                const SizedBox(height: 12),
-
-                _ToolRow(
-                  icon: Icons.favorite_border,
-                  label: 'Health check',
-                  onTap: () async {
-                    await Navigator.pushNamed(context, '/mothers-list');
-                    if (mounted) setState(() {});
                   },
                 ),
-
-                _ToolRow(
-                  icon: Icons.calendar_month_outlined,
-                  label: 'ANC schedule',
-                  onTap: () {},
-                ),
-
-                _ToolRow(
-                  icon: Icons.groups_outlined,
-                  label: 'My mothers',
-                  onTap: () async {
-                    await Navigator.pushNamed(context, '/mothers-list');
-                    if (mounted) setState(() {});
-                  },
-                ),
-
-                _ToolRow(
-                  icon: Icons.emergency_outlined,
-                  label: 'Emergency',
-                  onTap: () {},
-                  isUrgent: true,
-                ),
-
-                _ToolRow(
-                  icon: Icons.smart_toy_outlined,
-                  label: 'Ask AMMA',
-                  onTap: () {},
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );
   }
 }
 
-class _TopBar extends StatelessWidget {
-  final String workerName;
-  final bool isOnline;
+void _soon(BuildContext context) {
+  ScaffoldMessenger.of(context)
+      .showSnackBar(const SnackBar(content: Text('Coming soon')));
+}
 
-  const _TopBar({
-    required this.workerName,
-    required this.isOnline,
-  });
+Future<void> _logout(BuildContext context) async {
+  await AuthService().signOut();
+  if (context.mounted) {
+    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+  }
+}
+
+class _TopBar extends StatelessWidget {
+  final String uid;
+  final bool offline;
+
+  const _TopBar({required this.uid, required this.offline});
 
   @override
   Widget build(BuildContext context) {
-    final initial = workerName.isNotEmpty
-        ? workerName[0].toUpperCase()
-        : '?';
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: AuthService().getUserProfile(uid),
+      builder: (context, snapshot) {
+        final name = (snapshot.data?['name'] ?? 'ASHA').toString();
+        final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
 
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 22,
-          backgroundColor:
-              AshaColors.primary.withValues(alpha: 0.12),
-          child: Text(
-            initial,
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.w700,
-              color: AshaColors.primaryDark,
-              fontSize: 18,
-            ),
-          ),
-        ),
-
-        const SizedBox(width: 12),
-
-        Expanded(
-          child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
-            children: [
-              Text(
-                workerName,
+        return Row(
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: AshaColors.primary.withValues(alpha: 0.12),
+              child: Text(
+                initial,
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.w700,
-                  fontSize: 17,
-                  color: AshaColors.ink,
+                  color: AshaColors.primaryDark,
+                  fontSize: 18,
                 ),
               ),
-              Text(
-                'ASHA Worker',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AshaColors.inkMuted,
-                ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                      color: AshaColors.ink,
+                    ),
+                  ),
+                  Text('ASHA Worker',
+                      style: GoogleFonts.inter(
+                          fontSize: 13, color: AshaColors.inkMuted)),
+                ],
               ),
-            ],
-          ),
-        ),
-
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 6,
-          ),
-          decoration: BoxDecoration(
-            color: isOnline
-                ? RiskColors.low.withValues(alpha: 0.1)
-                : AshaColors.inkMuted.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isOnline
-                    ? Icons.cloud_done_outlined
-                    : Icons.cloud_off_outlined,
-                size: 14,
-                color: isOnline
-                    ? RiskColors.low
-                    : AshaColors.inkMuted,
+            ),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: offline
+                    ? AshaColors.inkMuted.withValues(alpha: 0.1)
+                    : RiskColors.low.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
               ),
-
-              const SizedBox(width: 4),
-
-              Text(
-                isOnline ? 'Synced' : 'Offline',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isOnline
-                      ? RiskColors.low
-                      : AshaColors.inkMuted,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    offline
+                        ? Icons.cloud_off_outlined
+                        : Icons.cloud_done_outlined,
+                    size: 14,
+                    color: offline ? AshaColors.inkMuted : RiskColors.low,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    offline ? 'Offline' : 'Synced',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: offline ? AshaColors.inkMuted : RiskColors.low,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+            IconButton(
+              tooltip: 'Log out',
+              icon: const Icon(Icons.logout, color: AshaColors.inkMuted),
+              onPressed: () => _logout(context),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -311,47 +292,28 @@ class _StatTile extends StatelessWidget {
   final String value;
   final Color color;
 
-  const _StatTile({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  const _StatTile(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        vertical: 14,
-        horizontal: 8,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
         color: AshaColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AshaColors.border,
-        ),
+        border: Border.all(color: AshaColors.border),
       ),
       child: Column(
         children: [
-          Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-
+          Text(value,
+              style: GoogleFonts.inter(
+                  fontSize: 20, fontWeight: FontWeight.w700, color: color)),
           const SizedBox(height: 2),
-
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              color: AshaColors.inkMuted,
-            ),
-          ),
+          Text(label,
+              textAlign: TextAlign.center,
+              style:
+                  GoogleFonts.inter(fontSize: 11, color: AshaColors.inkMuted)),
         ],
       ),
     );
@@ -360,17 +322,13 @@ class _StatTile extends StatelessWidget {
 
 class _AttentionCard extends StatelessWidget {
   final MotherModel mother;
-  final String reason;
   final VoidCallback onTap;
 
-  const _AttentionCard({
-    required this.mother,
-    required this.reason,
-    required this.onTap,
-  });
+  const _AttentionCard({required this.mother, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final risk = mother.riskLevel;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -380,48 +338,28 @@ class _AttentionCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AshaColors.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: AshaColors.border,
-          ),
+          border: Border.all(color: AshaColors.border),
         ),
         child: Row(
           children: [
-            const Icon(
-              Icons.person_outline,
-              color: AshaColors.primary,
-              size: 22,
-            ),
-
+            Icon(risk.icon, color: risk.color, size: 22),
             const SizedBox(width: 12),
-
             Expanded(
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(mother.name,
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600, color: AshaColors.ink)),
                   Text(
-                    mother.name,
+                    '${risk.label} • ${mother.gestationalWeeks} weeks',
                     style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w600,
-                      color: AshaColors.ink,
-                    ),
-                  ),
-
-                  Text(
-                    reason,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: AshaColors.inkMuted,
-                    ),
+                        fontSize: 13, color: AshaColors.inkMuted),
                   ),
                 ],
               ),
             ),
-
-            const Icon(
-              Icons.chevron_right,
-              color: AshaColors.inkMuted,
-            ),
+            const Icon(Icons.chevron_right, color: AshaColors.inkMuted),
           ],
         ),
       ),
@@ -449,10 +387,7 @@ class _ToolRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
           color: AshaColors.surface,
           borderRadius: BorderRadius.circular(12),
@@ -464,31 +399,17 @@ class _ToolRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isUrgent
-                  ? RiskColors.high
-                  : AshaColors.primary,
-            ),
-
+            Icon(icon,
+                size: 20,
+                color: isUrgent ? RiskColors.high : AshaColors.primary),
             const SizedBox(width: 14),
-
             Expanded(
-              child: Text(
-                label,
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.w500,
-                  color: AshaColors.ink,
-                ),
-              ),
+              child: Text(label,
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w500, color: AshaColors.ink)),
             ),
-
-            const Icon(
-              Icons.chevron_right,
-              size: 18,
-              color: AshaColors.inkMuted,
-            ),
+            const Icon(Icons.chevron_right,
+                size: 18, color: AshaColors.inkMuted),
           ],
         ),
       ),

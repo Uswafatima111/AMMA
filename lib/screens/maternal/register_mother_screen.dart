@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/mother_model.dart';
-import '../../core/constants/app_enums.dart';
+import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
-import '../../services/local_mother_store.dart';
+import '../../services/health_record_service.dart';
+import '../../services/health_service.dart';
 
 class RegisterMotherScreen extends StatefulWidget {
   const RegisterMotherScreen({super.key});
@@ -18,11 +19,11 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _ageController = TextEditingController();
-  final _gestationalWeeksController = TextEditingController();
+  final _weeksController = TextEditingController();
   final _bpController = TextEditingController();
   final _weightController = TextEditingController();
   final _hemoglobinController = TextEditingController();
-  final _emergencyContactController = TextEditingController();
+  final _emergencyController = TextEditingController();
 
   final Set<String> _selectedSymptoms = {};
   static const List<String> _symptomOptions = [
@@ -34,66 +35,132 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
 
   bool _isSaving = false;
 
-  Future<void> _handleSave() async {
-  if (!_formKey.currentState!.validate()) return;
-
-  setState(() => _isSaving = true);
-
-  final userId = DateTime.now().millisecondsSinceEpoch.toString(); // TODO: replace once Uswa confirms real ID strategy (auto-ID vs matching auth uid)
-
-  // Try to save to Firestore, but don't let a failure block registration —
-  // TEMPORARY while Firebase isn't running locally. Revert once Firebase
-  // is confirmed working so a failed save is surfaced to the user again.
-  try {
-    await FirestoreService().createMother(
-      userId: userId,
-      name: _nameController.text.trim(),
-      pregnancyWeek: int.tryParse(_gestationalWeeksController.text.trim()) ?? 0,
-      status: 'active', // TODO: confirm what values `status` expects with Uswa
-    );
-  } catch (_) {
-    // Firebase not available right now — continue locally.
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // BACKEND INTEGRATION REQUIRED FROM USWA — vitals below have no home yet:
-  // age, phone, bloodPressure, weight, hemoglobin, symptoms, emergencyContact
-  // are collected here but NOT saved anywhere until createMother() is
-  // expanded, or we're told to route them through addHealthRecord() instead.
+  Future<void> _handleSave() async {
+    if (!_formKey.currentState!.validate()) return;
 
-  if (!mounted) return;
+    final ashaUid = AuthService().currentUser?.uid;
+    if (ashaUid == null) {
+      _snack('Please log in again');
+      return;
+    }
 
-  final newMother = MotherModel(
-    id: userId,
-    name: _nameController.text.trim(),
-    age: int.tryParse(_ageController.text.trim()) ?? 0,
-    phone: _phoneController.text.trim(),
-    gestationalWeeks: int.tryParse(_gestationalWeeksController.text.trim()) ?? 0,
-    bloodPressure: _bpController.text.trim(),
-    weight: double.tryParse(_weightController.text.trim()) ?? 0,
-    hemoglobin: double.tryParse(_hemoglobinController.text.trim()) ?? 0,
-    symptoms: _selectedSymptoms.toList(),
-    emergencyContact: _emergencyContactController.text.trim(),
-    riskLevel: RiskLevel.low,
-    assignedAshaId: 'mock-asha-01',
-    createdAt: DateTime.now(),
-  );
-  LocalMotherStore.instance.addMother(newMother);
-  Navigator.pushReplacementNamed(context, '/mother-profile', arguments: newMother);
+    setState(() => _isSaving = true);
 
-  if (mounted) setState(() => _isSaving = false);
-}
+    try {
+      final name = _nameController.text.trim();
+      final phone = _phoneController.text.trim();
+      final age = int.parse(_ageController.text.trim());
+      final weeks = int.parse(_weeksController.text.trim());
+      final bp = _bpController.text.trim();
+      final weight = double.parse(_weightController.text.trim());
+      final hb = double.parse(_hemoglobinController.text.trim());
+      final emergency = _emergencyController.text.trim();
+      final symptoms = _selectedSymptoms.toList();
+
+      // Uswa's RiskEngine decides the starting risk level.
+      final risk = HealthService().assess(
+        pregnancyWeek: weeks,
+        bloodPressure: bp,
+        hemoglobin: hb,
+        weight: weight,
+        symptoms: symptoms,
+      );
+
+      final motherId = await FirestoreService().createMotherProfile(
+        name: name,
+        age: age,
+        phone: phone,
+        gestationalWeeks: weeks,
+        bloodPressure: bp,
+        weight: weight,
+        hemoglobin: hb,
+        symptoms: symptoms,
+        emergencyContact: emergency,
+        assignedAshaId: ashaUid,
+        riskLevel: risk.riskLevel.name,
+      );
+
+      // Save the registration vitals as her first health record.
+      await HealthRecordService().addHealthRecord(
+        motherId: motherId,
+        bloodPressure: bp,
+        weight: weight,
+        hemoglobin: hb,
+        symptoms: symptoms,
+        riskLevel: risk.riskLevel.name,
+        matchedRules: risk.matchedRules,
+        explanation: risk.explanation,
+        recommendation: risk.recommendation,
+        ruleVersion: risk.ruleVersion,
+      );
+
+      if (!mounted) return;
+
+      final mother = MotherModel(
+        id: motherId,
+        name: name,
+        age: age,
+        phone: phone,
+        gestationalWeeks: weeks,
+        bloodPressure: bp,
+        weight: weight,
+        hemoglobin: hb,
+        symptoms: symptoms,
+        emergencyContact: emergency,
+        riskLevel: risk.riskLevel,
+        assignedAshaId: ashaUid,
+        createdAt: DateTime.now(),
+      );
+
+      _snack('$name registered');
+      Navigator.pushReplacementNamed(context, '/mother-profile',
+          arguments: mother);
+    } on ArgumentError catch (e) {
+      _snack('${e.message}');
+    } catch (_) {
+      _snack('Could not save. Check your connection and try again.');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
     _ageController.dispose();
-    _gestationalWeeksController.dispose();
+    _weeksController.dispose();
     _bpController.dispose();
     _weightController.dispose();
     _hemoglobinController.dispose();
-    _emergencyContactController.dispose();
+    _emergencyController.dispose();
     super.dispose();
+  }
+
+  String? _required(String? v) =>
+      (v == null || v.trim().isEmpty) ? 'Required' : null;
+
+  String? _intInRange(String? v, int min, int max) {
+    final n = int.tryParse((v ?? '').trim());
+    if (n == null || n < min || n > max) return 'Enter $min to $max';
+    return null;
+  }
+
+  String? _positiveNumber(String? v) {
+    final n = double.tryParse((v ?? '').trim());
+    if (n == null || n <= 0) return 'Enter a number';
+    return null;
+  }
+
+  String? _bloodPressure(String? v) {
+    final ok = RegExp(r'^\d{2,3}\s*/\s*\d{2,3}$').hasMatch((v ?? '').trim());
+    return ok ? null : 'Use the form 120/80';
   }
 
   @override
@@ -108,7 +175,8 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
           elevation: 0,
           title: Text(
             'Register mother',
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AshaColors.ink),
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.w700, color: AshaColors.ink),
           ),
           iconTheme: const IconThemeData(color: AshaColors.ink),
         ),
@@ -118,19 +186,19 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               children: [
-                _SectionLabel('Basic details'),
+                const _SectionLabel('Basic details'),
                 _AppTextField(
                   controller: _nameController,
                   label: 'Full name',
                   icon: Icons.person_outline,
-                  validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  validator: _required,
                 ),
                 _AppTextField(
                   controller: _phoneController,
                   label: 'Phone number',
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  validator: _required,
                 ),
                 Row(
                   children: [
@@ -140,28 +208,28 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
                         label: 'Age',
                         icon: Icons.cake_outlined,
                         keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        validator: (v) => _intInRange(v, 1, 120),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _AppTextField(
-                        controller: _gestationalWeeksController,
-                        label: 'Gestational weeks',
+                        controller: _weeksController,
+                        label: 'Weeks pregnant',
                         icon: Icons.pregnant_woman_outlined,
                         keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        validator: (v) => _intInRange(v, 1, 42),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                _SectionLabel('Vitals'),
+                const _SectionLabel('Vitals'),
                 _AppTextField(
                   controller: _bpController,
                   label: 'Blood pressure (e.g. 118/76)',
                   icon: Icons.favorite_outline,
-                  validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  validator: _bloodPressure,
                 ),
                 Row(
                   children: [
@@ -170,24 +238,26 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
                         controller: _weightController,
                         label: 'Weight (kg)',
                         icon: Icons.monitor_weight_outlined,
-                        keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        validator: _positiveNumber,
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _AppTextField(
                         controller: _hemoglobinController,
-                        label: 'Hemoglobin',
+                        label: 'Hemoglobin (g/dL)',
                         icon: Icons.water_drop_outlined,
-                        keyboardType: TextInputType.number,
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        validator: _positiveNumber,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                _SectionLabel('Symptoms'),
+                const _SectionLabel('Symptoms'),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -205,27 +275,31 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
                           }
                         });
                       },
-                      selectedColor: AshaColors.primary.withValues(alpha: 0.15),
+                      selectedColor:
+                          AshaColors.primary.withValues(alpha: 0.15),
                       checkmarkColor: AshaColors.primaryDark,
                       labelStyle: GoogleFonts.inter(
-                        color: selected ? AshaColors.primaryDark : AshaColors.inkMuted,
+                        color: selected
+                            ? AshaColors.primaryDark
+                            : AshaColors.inkMuted,
                         fontWeight: FontWeight.w500,
                       ),
                       backgroundColor: AshaColors.surface,
                       side: BorderSide(
-                        color: selected ? AshaColors.primary : AshaColors.border,
+                        color:
+                            selected ? AshaColors.primary : AshaColors.border,
                       ),
                     );
                   }).toList(),
                 ),
                 const SizedBox(height: 20),
-                _SectionLabel('Emergency contact'),
+                const _SectionLabel('Emergency contact'),
                 _AppTextField(
-                  controller: _emergencyContactController,
+                  controller: _emergencyController,
                   label: 'Emergency contact number',
                   icon: Icons.contact_phone_outlined,
                   keyboardType: TextInputType.phone,
-                  validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  validator: _required,
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
@@ -234,7 +308,8 @@ class _RegisterMotherScreenState extends State<RegisterMotherScreen> {
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
                       : const Text('Save mother'),
                 ),
@@ -293,7 +368,8 @@ class _AppTextField extends StatelessWidget {
         style: GoogleFonts.inter(color: AshaColors.ink),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: GoogleFonts.inter(color: AshaColors.inkMuted, fontSize: 14),
+          labelStyle:
+              GoogleFonts.inter(color: AshaColors.inkMuted, fontSize: 14),
           prefixIcon: Icon(icon, size: 20, color: AshaColors.inkMuted),
         ),
       ),
