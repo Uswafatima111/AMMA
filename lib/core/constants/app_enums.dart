@@ -28,6 +28,13 @@ enum AlertSeverity {
   high,
 }
 
+enum AppointmentStatus {
+  pending,
+  scheduled,
+  completed,
+  cancelled,
+}
+
 enum ReferralStatus {
   pending,
   accepted,

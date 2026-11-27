@@ -44,6 +44,19 @@ service cloud.firestore {
         get(/databases/$(database)/documents/mothers/$(motherId)).data.assignedAshaId == request.auth.uid;
     }
 
+    function patientOwnsMother(motherId) {
+      return isPatient() && motherId is string &&
+        exists(/databases/$(database)/documents/mothers/$(motherId)) &&
+        (get(/databases/$(database)/documents/mothers/$(motherId)).data.patientUid == request.auth.uid ||
+          motherId == request.auth.uid);
+    }
+
+    function appointmentMotherId(data) {
+      return data.get('motherId', null) is string
+        ? data.get('motherId', null)
+        : data.get('userId', '');
+    }
+
     match /users/{uid} {
       allow read: if isSelf(uid) ||
         (isAsha() && resource.data.role == 'patient');
@@ -101,20 +114,79 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      allow read: if (
-        resource.data.motherId is string &&
-        canAccessMother(resource.data.motherId)
-      ) || (
-        signedIn() &&
-        resource.data.userId == request.auth.uid
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (isPatient() && patientOwnsMother(resource.data.motherId)) ||
+        (isAsha() && resource.data.motherId is string &&
+          assignedToMother(resource.data.motherId)) ||
+        (isAsha() && resource.data.get('motherId', null) == null &&
+          resource.data.userId is string && assignedToMother(resource.data.userId))
       );
 
-      allow create: if isAsha() &&
-        request.resource.data.motherId is string &&
-        canAccessMother(request.resource.data.motherId) &&
-        request.resource.data.id == appointmentId;
+      allow create: if request.resource.data.id == appointmentId &&
+        request.resource.data.date is timestamp &&
+        request.resource.data.date > request.time &&
+        request.resource.data.status in ['pending', 'scheduled'] &&
+        request.resource.data.reminderEnabled is bool &&
+        request.resource.data.createdAt == request.time &&
+        ((isAsha() && request.resource.data.keys().hasOnly([
+            'id', 'motherId', 'date', 'type', 'status', 'reminderEnabled',
+            'doctorName', 'facilityName', 'appointmentKey', 'notes',
+            'createdBy', 'createdAt'
+          ]) && request.resource.data.motherId is string &&
+          assignedToMother(request.resource.data.motherId) &&
+          request.resource.data.type in ['routine', 'followUp', 'emergency'] &&
+          request.resource.data.createdBy == request.auth.uid) ||
+         (isPatient() && request.resource.data.keys().hasOnly([
+            'id', 'userId', 'title', 'doctorName', 'date', 'type', 'status',
+            'notes', 'reminderEnabled', 'createdAt'
+          ]) && request.resource.data.userId == request.auth.uid &&
+          request.resource.data.type == 'routine' &&
+          request.resource.data.title is string && request.resource.data.title.size() > 0));
 
-      allow update, delete: if false;
+      allow update: if isAsha() &&
+        assignedToMother(appointmentMotherId(resource.data)) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'updatedAt']) &&
+        request.resource.data.updatedAt == request.time &&
+        ((resource.data.status == 'pending' &&
+          request.resource.data.status in ['scheduled', 'cancelled']) ||
+         (resource.data.status == 'scheduled' &&
+          request.resource.data.status in ['completed', 'cancelled']));
+      allow delete: if false;
+    }
+
+    match /medicine_reminders/{reminderId} {
+      allow create: if isAsha() &&
+        request.resource.data.keys().hasOnly([
+          'motherId', 'medicineName', 'instructions', 'startDate', 'endDate',
+          'reminderTime', 'active', 'createdBy', 'createdAt'
+        ]) && request.resource.data.motherId is string &&
+        request.resource.data.motherId.size() <= 200 &&
+        assignedToMother(request.resource.data.motherId) &&
+        request.resource.data.medicineName is string &&
+        request.resource.data.medicineName.size() > 0 &&
+        request.resource.data.medicineName.size() <= 120 &&
+        request.resource.data.instructions is string &&
+        request.resource.data.instructions.size() > 0 &&
+        request.resource.data.instructions.size() <= 1000 &&
+        request.resource.data.startDate is timestamp &&
+        request.resource.data.endDate is timestamp &&
+        request.resource.data.startDate <= request.resource.data.endDate &&
+        request.resource.data.reminderTime is string &&
+        request.resource.data.reminderTime.matches('^(?:[01][0-9]|2[0-3]):[0-5][0-9]$') &&
+        request.resource.data.active == true &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow read: if resource.data.motherId is string &&
+        (patientOwnsMother(resource.data.motherId) ||
+          (isAsha() && assignedToMother(resource.data.motherId)));
+      allow update: if isAsha() && assignedToMother(resource.data.motherId) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['active', 'updatedAt']) &&
+        request.resource.data.active is bool &&
+        request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
 
     match /alerts/{alertId} {
