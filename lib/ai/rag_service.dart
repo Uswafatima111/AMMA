@@ -4,10 +4,7 @@ class RagContext {
   final String query;
   final List<RagResult> sources;
 
-  const RagContext({
-    required this.query,
-    required this.sources,
-  });
+  const RagContext({required this.query, required this.sources});
 
   bool get hasSources => sources.isNotEmpty;
 
@@ -21,17 +18,17 @@ class RagContext {
     for (var i = 0; i < sources.length; i++) {
       final source = sources[i];
 
-      buffer.writeln(
-        'SOURCE ${i + 1}: ${source.topic}',
-      );
-      buffer.writeln(
-        'Evidence: ${source.content}',
-      );
-      buffer.writeln(
-        'Source: ${source.source}',
-      );
+      buffer.writeln('SOURCE ${i + 1}: ${source.topic}');
+      buffer.writeln('Evidence: ${source.content}');
+      buffer.writeln('Source: ${source.source}');
+      if (source.sourceUrl != null) {
+        buffer.writeln('Source URL: ${source.sourceUrl}');
+      }
+      buffer.writeln('Review status: ${source.reviewStatus}');
+      if (source.lastReviewed != null) {
+        buffer.writeln('Last reviewed: ${source.lastReviewed}');
+      }
       buffer.writeln();
-
     }
 
     return buffer.toString().trim();
@@ -41,18 +38,9 @@ class RagContext {
 class RagService {
   final RagRetriever _retriever = RagRetriever();
 
-  RagContext retrieveKnowledge(
-    String query, {
-    int limit = 3,
-  }) {
-    final results = _retriever.retrieve(
-      query,
-      limit: limit,
-    );
+  RagContext retrieveKnowledge(String query, {int limit = 3}) {
+    final results = _retriever.retrieve(query, limit: limit);
 
-    return RagContext(
-      query: query,
-      sources: results,
-    );
+    return RagContext(query: query, sources: results);
   }
 }

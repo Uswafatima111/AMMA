@@ -63,14 +63,15 @@ void main() {
       expect(result.sources, isEmpty);
     });
 
-    test('uses a correctly encoded source separator', () {
+    test('includes source attribution and review metadata', () {
       final result = service.ask(
         'Tell me about blood pressure during pregnancy',
       );
 
       expect(result.sources, isNotEmpty);
-      expect(result.sources.first, contains(' — '));
-      expect(result.sources.first, isNot(contains('â€”')));
+      expect(result.sources.first, contains(' | '));
+      expect(result.sources.first, contains('clinical review required'));
+      expect(result.sources.first, contains('https://'));
     });
   });
 
