@@ -61,13 +61,17 @@ class AiRiskService {
     final weightValue = data['weight'];
     final hemoglobinValue = data['hemoglobin'];
 
-    final weight = weightValue is num
-        ? weightValue.toDouble()
-        : double.tryParse(weightValue?.toString() ?? '') ?? 0;
+    double? parseMeasurement(dynamic value) {
+      final parsed = value is num
+          ? value.toDouble()
+          : double.tryParse(value?.toString() ?? '');
+      return parsed != null && parsed.isFinite ? parsed : null;
+    }
 
-    final hemoglobin = hemoglobinValue is num
-        ? hemoglobinValue.toDouble()
-        : double.tryParse(hemoglobinValue?.toString() ?? '') ?? 0;
+    // Keep absent or malformed values absent. The risk engine reports them as
+    // invalid inputs instead of silently converting them to zero readings.
+    final weight = parseMeasurement(weightValue);
+    final hemoglobin = parseMeasurement(hemoglobinValue);
 
     final rawSymptoms = data['symptoms'];
     final symptoms = rawSymptoms is List
