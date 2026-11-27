@@ -1,7 +1,50 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class FirestoreService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore;
+  final FirebaseAuth _auth;
+
+  FirestoreService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
+
+  static String? resolvePatientMotherId({
+    required String patientUid,
+    required Iterable<Map<String, dynamic>> mothers,
+  }) {
+    final matches = mothers
+        .where((mother) => mother['patientUid'] == patientUid)
+        .toList();
+    if (matches.length > 1) {
+      throw StateError('More than one mother profile is linked to this patient UID.');
+    }
+    if (matches.isEmpty) return null;
+    final id = matches.single['id'];
+    if (id is! String || id.trim().isEmpty) {
+      throw StateError('The linked mother profile has no stable document ID.');
+    }
+    return id;
+  }
+
+  static String? resolveAssignedMotherId({
+    required String legacyUserId,
+    required Iterable<Map<String, dynamic>> mothers,
+  }) {
+    final matches = mothers.where((mother) =>
+        mother['id'] == legacyUserId ||
+        mother['userId'] == legacyUserId ||
+        mother['patientUid'] == legacyUserId).toList();
+    if (matches.length > 1) {
+      throw StateError('The legacy patient identifier matches multiple mothers.');
+    }
+    if (matches.isEmpty) return null;
+    final id = matches.single['id'];
+    if (id is! String || id.trim().isEmpty) {
+      throw StateError('The assigned mother profile has no stable document ID.');
+    }
+    return id;
+  }
 
   // ------------------------------------------------------------
   // LEGACY COMPATIBILITY
@@ -10,22 +53,38 @@ class FirestoreService {
   // ------------------------------------------------------------
 
   Future<Map<String, dynamic>?> getMother(String userId) async {
-    final document = await _firestore.collection('mothers').doc(userId).get();
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || uid.isEmpty) throw StateError('Authentication required.');
+    final role = await _role(uid);
 
-    if (!document.exists) {
-      return null;
+    if (role == 'patient') {
+      if (userId != uid) {
+        throw StateError('Patients may only retrieve their own linked profile.');
+      }
+      return getMotherForPatient(uid);
     }
-
-    final data = document.data()!;
-    return {
-      ...data,
-      'id': document.id,
-      'gestationalWeeks': data['gestationalWeeks'] ?? data['pregnancyWeek'],
-    };
+    if (role != 'asha') throw StateError('A valid user role is required.');
+    return getMotherById(userId);
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> getMothers() {
-    return _firestore.collection('mothers').orderBy('name').snapshots();
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || uid.isEmpty) {
+      return Stream.error(StateError('Authentication required.'));
+    }
+    return _firestore.collection('users').doc(uid).get().asStream().asyncExpand((profile) {
+      final role = profile.data()?['role'];
+      if (!profile.exists || (role != 'asha' && role != 'patient')) {
+        return Stream<QuerySnapshot<Map<String, dynamic>>>.error(
+          StateError('A valid user profile is required.'),
+        );
+      }
+      final query = _firestore.collection('mothers');
+      return (role == 'asha'
+              ? query.where('assignedAshaId', isEqualTo: uid)
+              : query.where('patientUid', isEqualTo: uid))
+          .snapshots();
+    });
   }
 
   // Legacy method used by existing screens.
@@ -35,15 +94,38 @@ class FirestoreService {
     required int pregnancyWeek,
     required String status,
   }) async {
-    await _firestore.collection('mothers').doc(userId).set({
-      'id': userId,
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || await _role(uid) != 'asha') {
+      throw StateError('Only an authenticated ASHA can register a mother.');
+    }
+    final patient = await _firestore.collection('users').doc(userId).get();
+    if (!patient.exists || patient.data()?['role'] != 'patient') {
+      throw StateError('The linked patient profile does not exist.');
+    }
+    final existingLinks = await _firestore
+        .collection('mothers')
+        .where('assignedAshaId', isEqualTo: uid)
+        .get();
+    if (existingLinks.docs.any((doc) => doc.data()['patientUid'] == userId)) {
+      throw StateError('This patient already has a linked mother profile.');
+    }
+    final ref = _firestore.collection('mothers').doc();
+    final data = <String, dynamic>{
+      'id': ref.id,
       'userId': userId,
+      'patientUid': userId,
+      'assignedAshaId': uid,
       'name': name,
       'pregnancyWeek': pregnancyWeek,
       'gestationalWeeks': pregnancyWeek,
       'status': status,
       'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    };
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(ref);
+      if (existing.exists) throw StateError('Mother ID collision; retry creation.');
+      transaction.set(ref, data);
+    });
   }
 
   // Legacy update method.
@@ -103,6 +185,13 @@ class FirestoreService {
     String? patientUid,
     DateTime? expectedDeliveryDate,
   }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || await _role(uid) != 'asha') {
+      throw StateError('Only an authenticated ASHA can register a mother.');
+    }
+    if (assignedAshaId != uid) {
+      throw StateError('A mother must be assigned to the authenticated ASHA.');
+    }
     if (name.trim().isEmpty) {
       throw ArgumentError('Mother name cannot be empty.');
     }
@@ -140,14 +229,37 @@ class FirestoreService {
     };
 
     if (patientUid != null && patientUid.trim().isNotEmpty) {
-      data['patientUid'] = patientUid.trim();
+      final normalizedPatientUid = patientUid.trim();
+      final patient = await _firestore
+          .collection('users')
+          .doc(normalizedPatientUid)
+          .get();
+      if (!patient.exists || patient.data()?['role'] != 'patient') {
+        throw StateError('The linked patient profile does not exist.');
+      }
+      final assignedMothers = await _firestore
+          .collection('mothers')
+          .where('assignedAshaId', isEqualTo: uid)
+          .get();
+      if (assignedMothers.docs.any(
+        (doc) => doc.data()['patientUid'] == normalizedPatientUid,
+      )) {
+        throw StateError('This patient already has a linked mother profile.');
+      }
+      data['patientUid'] = normalizedPatientUid;
+      // Compatibility alias for older callers. patientUid remains canonical.
+      data['userId'] = normalizedPatientUid;
     }
 
     if (expectedDeliveryDate != null) {
       data['expectedDeliveryDate'] = Timestamp.fromDate(expectedDeliveryDate);
     }
 
-    await motherRef.set(data);
+    await _firestore.runTransaction((transaction) async {
+      final existing = await transaction.get(motherRef);
+      if (existing.exists) throw StateError('Mother ID collision; retry creation.');
+      transaction.set(motherRef, data);
+    });
     return motherRef.id;
   }
 
@@ -159,41 +271,100 @@ class FirestoreService {
       return null;
     }
 
-    return {...document.data()!, 'id': document.id};
+    final data = document.data()!;
+    return {
+      ...data,
+      'id': document.id,
+      'userId': data['userId'] ?? data['patientUid'] ?? document.id,
+      'pregnancyWeek': data['pregnancyWeek'] ?? data['gestationalWeeks'],
+      'gestationalWeeks': data['gestationalWeeks'] ?? data['pregnancyWeek'],
+    };
   }
 
   /// Finds the mother linked to a patient's Firebase Auth UID.
   ///
   /// Falls back to the legacy UID-as-document-ID convention.
   Future<Map<String, dynamic>?> getMotherForPatient(String patientUid) async {
+    final authenticatedUid = _auth.currentUser?.uid;
+    if (authenticatedUid == null || authenticatedUid.isEmpty) {
+      throw StateError('Authentication required.');
+    }
+    if (patientUid != authenticatedUid || await _role(authenticatedUid) != 'patient') {
+      throw StateError('Only the authenticated patient can resolve their mother.');
+    }
     final linkedMothers = await _firestore
         .collection('mothers')
-        .where('patientUid', isEqualTo: patientUid)
+        .where('patientUid', isEqualTo: authenticatedUid)
         .limit(2)
         .get();
 
-    if (linkedMothers.docs.length > 1) {
-      throw StateError(
-        'More than one mother profile is linked to this patient UID.',
-      );
-    }
-
-    if (linkedMothers.docs.length == 1) {
-      final document = linkedMothers.docs.first;
-      return {...document.data(), 'id': document.id};
+    final linkedId = resolvePatientMotherId(
+      patientUid: authenticatedUid,
+      mothers: linkedMothers.docs.map((document) => {
+        ...document.data(),
+        'id': document.id,
+      }),
+    );
+    if (linkedId != null) {
+      final document = linkedMothers.docs.firstWhere((doc) => doc.id == linkedId);
+      final data = document.data();
+      return {
+        ...data,
+        'id': document.id,
+        'userId': data['userId'] ?? authenticatedUid,
+        'pregnancyWeek': data['pregnancyWeek'] ?? data['gestationalWeeks'],
+        'gestationalWeeks': data['gestationalWeeks'] ?? data['pregnancyWeek'],
+      };
     }
 
     // Backward compatibility for older profiles.
-    return getMother(patientUid);
+    final legacy = await _firestore.collection('mothers').doc(authenticatedUid).get();
+    if (!legacy.exists) return null;
+    final legacyData = legacy.data()!;
+    if (legacyData['patientUid'] != null && legacyData['patientUid'] != authenticatedUid) {
+      return null;
+    }
+    return {
+      ...legacyData,
+      'id': legacy.id,
+      'gestationalWeeks': legacyData['gestationalWeeks'] ?? legacyData['pregnancyWeek'],
+    };
   }
 
   /// Streams mothers assigned to the specified ASHA UID.
   Stream<QuerySnapshot<Map<String, dynamic>>> getMothersAssignedToAsha(
     String ashaUid,
   ) {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || uid.isEmpty || ashaUid != uid) {
+      return Stream.error(StateError('An ASHA may list only their own assignments.'));
+    }
     return _firestore
         .collection('mothers')
         .where('assignedAshaId', isEqualTo: ashaUid)
         .snapshots();
+  }
+
+  Future<String?> findAssignedMotherId(String legacyUserId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null || uid.isEmpty || await _role(uid) != 'asha') {
+      throw StateError('Only an authenticated ASHA can resolve assigned mothers.');
+    }
+    final assigned = await _firestore
+        .collection('mothers')
+        .where('assignedAshaId', isEqualTo: uid)
+        .get();
+    return resolveAssignedMotherId(
+      legacyUserId: legacyUserId,
+      mothers: assigned.docs.map((doc) => {...doc.data(), 'id': doc.id}),
+    );
+  }
+
+  Future<String?> _role(String uid) async {
+    final profile = await _firestore.collection('users').doc(uid).get();
+    final role = profile.data()?['role'];
+    return profile.exists && (role == 'patient' || role == 'asha')
+        ? role as String
+        : null;
   }
 }
