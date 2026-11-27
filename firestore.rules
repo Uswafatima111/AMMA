@@ -38,6 +38,12 @@ service cloud.firestore {
         );
     }
 
+    function assignedToMother(motherId) {
+      return signedIn() && motherId is string &&
+        exists(/databases/$(database)/documents/mothers/$(motherId)) &&
+        get(/databases/$(database)/documents/mothers/$(motherId)).data.assignedAshaId == request.auth.uid;
+    }
+
     match /users/{uid} {
       allow read: if isSelf(uid) ||
         (isAsha() && resource.data.role == 'patient');
@@ -126,6 +132,95 @@ service cloud.firestore {
         request.resource.data.id == alertId;
 
       allow update, delete: if false;
+    }
+
+    // Emergency requests are separate from ordinary alerts. The patient can
+    // create/read only their own request; only the assigned ASHA can read and
+    // move it through active -> responded -> resolved.
+    match /emergency_requests/{requestId} {
+      allow create: if isPatient() &&
+        request.resource.data.keys().hasOnly([
+          'patientId', 'motherId', 'assignedAshaId', 'message', 'type',
+          'severity', 'status', 'latitude', 'longitude', 'createdAt',
+          'respondedAt', 'respondedBy', 'resolvedAt', 'resolvedBy'
+        ]) &&
+        request.resource.data.patientId == request.auth.uid &&
+        request.resource.data.message is string && request.resource.data.message.size() > 0 &&
+        request.resource.data.type == 'medical_emergency' &&
+        request.resource.data.severity == 'critical' &&
+        request.resource.data.status == 'active' &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.respondedAt == null &&
+        request.resource.data.respondedBy == null &&
+        request.resource.data.resolvedAt == null &&
+        request.resource.data.resolvedBy == null &&
+        ((request.resource.data.motherId == null && request.resource.data.assignedAshaId == null) ||
+          (request.resource.data.motherId is string &&
+            exists(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)) &&
+            (get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.patientUid == request.auth.uid ||
+              (request.resource.data.motherId == request.auth.uid &&
+                get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.userId == request.auth.uid)) &&
+            request.resource.data.assignedAshaId == get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.assignedAshaId));
+
+      allow read: if signedIn() && (
+        resource.data.patientId == request.auth.uid ||
+        (isAsha() && assignedToMother(resource.data.motherId))
+      );
+
+      allow update: if isAsha() &&
+        assignedToMother(resource.data.motherId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'respondedAt', 'respondedBy', 'resolvedAt', 'resolvedBy'
+        ]) &&
+        ((resource.data.status == 'active' && request.resource.data.status == 'responded' &&
+          request.resource.data.respondedBy == request.auth.uid &&
+          request.resource.data.respondedAt == request.time &&
+          request.resource.data.resolvedAt == null && request.resource.data.resolvedBy == null) ||
+         (resource.data.status == 'responded' && request.resource.data.status == 'resolved' &&
+          request.resource.data.respondedBy == resource.data.respondedBy &&
+          request.resource.data.respondedAt == resource.data.respondedAt &&
+          resource.data.respondedBy is string &&
+          resource.data.respondedAt is timestamp &&
+          request.resource.data.resolvedBy == request.auth.uid &&
+          request.resource.data.resolvedAt == request.time));
+      allow delete: if false;
+    }
+
+    // Referrals are initiated and maintained by the ASHA assigned to the
+    // mother. Facility is plain text supplied by the worker; no contact data
+    // or external booking integration is implied.
+    match /referrals/{referralId} {
+      allow create: if isAsha() &&
+        request.resource.data.keys().hasOnly([
+          'motherId', 'referringAshaId', 'facility', 'status', 'createdAt',
+          'updatedAt', 'acceptedAt', 'completedAt', 'cancelledAt'
+        ]) && request.resource.data.motherId is string &&
+        assignedToMother(request.resource.data.motherId) &&
+        request.resource.data.referringAshaId == request.auth.uid &&
+        request.resource.data.facility is string && request.resource.data.facility.size() > 0 &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time &&
+        request.resource.data.acceptedAt == null && request.resource.data.completedAt == null &&
+        request.resource.data.cancelledAt == null;
+      // The original referringAshaId is immutable. Access follows the
+      // mother's current assignment so a replacement ASHA can continue it.
+      allow read: if isAsha() && assignedToMother(resource.data.motherId);
+      allow update: if isAsha() &&
+        assignedToMother(resource.data.motherId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'updatedAt', 'acceptedAt', 'completedAt', 'cancelledAt'
+        ]) && request.resource.data.updatedAt == request.time &&
+        ((resource.data.status == 'pending' &&
+          (request.resource.data.status == 'accepted' || request.resource.data.status == 'cancelled') &&
+          request.resource.data.acceptedAt == (request.resource.data.status == 'accepted' ? request.time : null) &&
+          request.resource.data.cancelledAt == (request.resource.data.status == 'cancelled' ? request.time : null) &&
+          request.resource.data.completedAt == null) ||
+         (resource.data.status == 'accepted' &&
+          (request.resource.data.status == 'completed' || request.resource.data.status == 'cancelled') &&
+          request.resource.data.acceptedAt == resource.data.acceptedAt &&
+          request.resource.data.completedAt == (request.resource.data.status == 'completed' ? request.time : null) &&
+          request.resource.data.cancelledAt == (request.resource.data.status == 'cancelled' ? request.time : null)));
+      allow delete: if false;
     }
   }
 }
