@@ -1,10 +1,17 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/risk_result.dart';
 import '../screens/ai/risk_engine.dart';
+import 'firestore_service.dart';
 
 class AiRiskService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore;
+  final FirebaseAuth _auth;
+
+  AiRiskService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
 
   final RiskEngine _riskEngine = RiskEngine();
 
@@ -17,20 +24,40 @@ class AiRiskService {
     String? motherId,
     required int pregnancyWeek,
   }) async {
-    final resolvedId = motherId?.trim().isNotEmpty == true
-        ? motherId!.trim()
-        : userId?.trim();
+    var resolvedMotherId = motherId?.trim();
+    var unlinkedPatientUid = '';
+    if (resolvedMotherId?.isNotEmpty != true) {
+      final uid = _auth.currentUser?.uid;
+      if (uid == null || uid.isEmpty || userId?.trim() != uid) {
+        throw StateError('A patient may assess only their own health records.');
+      }
+      final mother = await FirestoreService(
+        firestore: _firestore,
+        auth: _auth,
+      ).getMotherForPatient(uid);
+      resolvedMotherId = mother?['id'] as String?;
+      if (resolvedMotherId == null || resolvedMotherId.isEmpty) {
+        unlinkedPatientUid = uid;
+      }
+    }
 
-    if (resolvedId == null || resolvedId.isEmpty) {
+    if ((resolvedMotherId == null || resolvedMotherId.isEmpty) &&
+        unlinkedPatientUid.isEmpty) {
       throw ArgumentError('A motherId or legacy userId is required.');
     }
 
     final collection = _firestore.collection('health_records');
 
-    final results = await Future.wait([
-      collection.where('motherId', isEqualTo: resolvedId).get(),
-      collection.where('userId', isEqualTo: resolvedId).get(),
-    ]);
+    // Linked patients and assigned ASHAs use only the canonical, authorized
+    // motherId query. A userId-only query is reserved for genuinely unlinked
+    // patients whose legacy records are authorized by the rules.
+    final results = await (resolvedMotherId?.isNotEmpty == true
+        ? Future.wait([
+            collection.where('motherId', isEqualTo: resolvedMotherId).get(),
+          ])
+        : Future.wait([
+            collection.where('userId', isEqualTo: unlinkedPatientUid).get(),
+          ]));
 
     // Merge results and remove duplicates by document ID.
     final documents = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};

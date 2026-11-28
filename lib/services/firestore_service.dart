@@ -98,10 +98,6 @@ class FirestoreService {
     if (uid == null || await _role(uid) != 'asha') {
       throw StateError('Only an authenticated ASHA can register a mother.');
     }
-    final patient = await _firestore.collection('users').doc(userId).get();
-    if (!patient.exists || patient.data()?['role'] != 'patient') {
-      throw StateError('The linked patient profile does not exist.');
-    }
     final existingLinks = await _firestore
         .collection('mothers')
         .where('assignedAshaId', isEqualTo: uid)
@@ -125,6 +121,9 @@ class FirestoreService {
       final existing = await transaction.get(ref);
       if (existing.exists) throw StateError('Mother ID collision; retry creation.');
       transaction.set(ref, data);
+      transaction.update(_firestore.collection('users').doc(userId), {
+        'assignedMotherId': ref.id,
+      });
     });
   }
 
@@ -230,13 +229,6 @@ class FirestoreService {
 
     if (patientUid != null && patientUid.trim().isNotEmpty) {
       final normalizedPatientUid = patientUid.trim();
-      final patient = await _firestore
-          .collection('users')
-          .doc(normalizedPatientUid)
-          .get();
-      if (!patient.exists || patient.data()?['role'] != 'patient') {
-        throw StateError('The linked patient profile does not exist.');
-      }
       final assignedMothers = await _firestore
           .collection('mothers')
           .where('assignedAshaId', isEqualTo: uid)
@@ -259,6 +251,12 @@ class FirestoreService {
       final existing = await transaction.get(motherRef);
       if (existing.exists) throw StateError('Mother ID collision; retry creation.');
       transaction.set(motherRef, data);
+      if (data['patientUid'] is String) {
+        transaction.update(
+          _firestore.collection('users').doc(data['patientUid'] as String),
+          {'assignedMotherId': motherRef.id},
+        );
+      }
     });
     return motherRef.id;
   }

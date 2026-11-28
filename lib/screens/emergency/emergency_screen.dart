@@ -37,7 +37,8 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       if (!mounted) return;
 
       _showMessage(
-        'Emergency alert sent. Request ID: $emergencyId',
+        'Emergency request recorded in AMMA. '
+        'It does not contact emergency services. Request ID: $emergencyId',
       );
     } catch (e) {
       if (!mounted) return;
@@ -61,7 +62,8 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
         return AlertDialog(
           title: const Text('Emergency SOS'),
           content: const Text(
-            'Are you sure you want to send an emergency alert?',
+            'Submit an in-app emergency request? '
+            'This does not contact an ambulance or emergency services.',
           ),
           actions: [
             TextButton(
@@ -74,7 +76,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               onPressed: () {
                 Navigator.pop(context, true);
               },
-              child: const Text('SEND SOS'),
+              child: const Text('SUBMIT REQUEST'),
             ),
           ],
         );

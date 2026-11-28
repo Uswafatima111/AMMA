@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import '../ai/ai_risk_screen.dart';
 import '../ai/amma_chat_screen.dart';
 import '../../services/alert_service.dart';
+import '../../services/asha_service.dart';
 import '../../services/appointment_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/health_record_service.dart';
+import '../../services/reminder_service.dart';
 import '../emergency/emergency_screen.dart';
 import '../login_screen.dart';
+import 'patient_local_reminder_controls.dart';
 
 class PatientDashboard extends StatelessWidget {
   const PatientDashboard({super.key});
@@ -117,6 +120,10 @@ class PatientDashboard extends StatelessWidget {
                     ),
                   ),
                 ),
+
+                const SizedBox(height: 16),
+
+                PatientAshaContactCard(service: AshaService()),
 
                 const SizedBox(height: 16),
 
@@ -276,8 +283,15 @@ class PatientDashboard extends StatelessWidget {
 
                 const SizedBox(height: 10),
 
-                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: AppointmentService().getAppointments(user.uid),
+                PatientLocalReminderControls(
+                  patientUid: user.uid,
+                  motherId: mother['id'] as String,
+                ),
+
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: AppointmentService().watchAppointmentsForMother(
+                    mother['id'] as String,
+                  ),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Card(
@@ -297,7 +311,7 @@ class PatientDashboard extends StatelessWidget {
                       );
                     }
 
-                    final appointments = snapshot.data?.docs ?? [];
+                    final appointments = snapshot.data ?? [];
 
                     if (appointments.isEmpty) {
                       return const Card(
@@ -309,12 +323,13 @@ class PatientDashboard extends StatelessWidget {
                     }
 
                     return Column(
-                      children: appointments.map((appointment) {
-                        final data = appointment.data();
-
-                        final timestamp = data['date'] as Timestamp?;
-
-                        final date = timestamp?.toDate();
+                      children: appointments.map((data) {
+                        final value = data['date'];
+                        final date = value is Timestamp
+                            ? value.toDate()
+                            : value is DateTime
+                            ? value
+                            : null;
 
                         final formattedDate = date == null
                             ? 'Date not available'
@@ -326,7 +341,7 @@ class PatientDashboard extends StatelessWidget {
                           child: ListTile(
                             leading: const Icon(Icons.calendar_month),
                             title: Text(
-                              '${data['title']}',
+                              '${data['title'] ?? data['facilityName'] ?? 'Appointment'}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                               ),
@@ -344,6 +359,69 @@ class PatientDashboard extends StatelessWidget {
                     );
                   },
                 ),
+
+                const SizedBox(height: 24),
+                const Text(
+                  'Medicine reminders',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: ReminderService().watchForMother(
+                    mother['id'] as String,
+                  ),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('Unable to load medicine reminders.'),
+                        ),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                      );
+                    }
+                    final reminders = snapshot.data!.docs;
+                    if (reminders.isEmpty) {
+                      return const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('No medicine reminders found.'),
+                        ),
+                      );
+                    }
+                    return Column(
+                      children: reminders.map((reminder) {
+                        final data = reminder.data();
+                        final active = data['active'] == true;
+                        return Card(
+                          child: ListTile(
+                            leading: Icon(
+                              active ? Icons.medication : Icons.pause_circle,
+                            ),
+                            title: Text('${data['medicineName']}'),
+                            subtitle: Text(
+                              '${data['instructions']}\n'
+                              'Time: ${data['reminderTime']} · '
+                              '${active ? 'Active' : 'Inactive'}',
+                            ),
+                            isThreeLine: true,
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 24),
+
+                const PatientHelpRequestCard(),
 
                 const SizedBox(height: 24),
 
@@ -391,7 +469,13 @@ class PatientDashboard extends StatelessWidget {
                       children: alerts.map((alert) {
                         final data = alert.data();
 
-                        final isRead = data['isRead'] == true;
+                        final isRead =
+                            data['isRead'] == true || data['status'] == 'read';
+                        final title = data['title'] ?? switch (data['type']) {
+                          'benefit_help' => 'Benefit help request',
+                          'appointment_request' => 'Appointment request',
+                          _ => 'Alert',
+                        };
 
                         return Card(
                           child: ListTile(
@@ -401,7 +485,7 @@ class PatientDashboard extends StatelessWidget {
                                   : Icons.notifications_active,
                             ),
                             title: Text(
-                              '${data['title']}',
+                              '$title',
                               style: TextStyle(
                                 fontWeight: isRead
                                     ? FontWeight.normal
@@ -412,11 +496,9 @@ class PatientDashboard extends StatelessWidget {
                             trailing: isRead
                                 ? null
                                 : const Icon(Icons.circle, size: 10),
-                            onTap: () async {
-                              if (!isRead) {
-                                await AlertService().markAsRead(alert.id);
-                              }
-                            },
+                            // Patient help requests are read-only. Acknowledging
+                            // and changing their status is an ASHA workflow.
+                            onTap: null,
                           ),
                         );
                       }).toList(),
@@ -437,4 +519,149 @@ class PatientDashboard extends StatelessWidget {
       ),
     );
   }
+}
+
+class PatientAshaContactCard extends StatefulWidget {
+  const PatientAshaContactCard({super.key, required this.service});
+
+  final AshaService service;
+
+  @override
+  State<PatientAshaContactCard> createState() => _PatientAshaContactCardState();
+}
+
+class _PatientAshaContactCardState extends State<PatientAshaContactCard> {
+  late final Future<Map<String, dynamic>?> _contact;
+
+  @override
+  void initState() {
+    super.initState();
+    _contact = widget.service.getAshaContact();
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>?>(
+    future: _contact,
+    builder: (context, snapshot) {
+      final contact = snapshot.data;
+      return Card(
+        child: ListTile(
+          leading: const Icon(Icons.support_agent),
+          title: Text(
+            contact?['name']?.toString().trim().isNotEmpty == true
+                ? contact!['name'].toString()
+                : 'Assigned ASHA',
+          ),
+          subtitle: Text(
+            snapshot.connectionState == ConnectionState.waiting
+                ? 'Loading contact details…'
+                : snapshot.hasError || contact == null
+                ? 'ASHA contact details are unavailable.'
+                : (contact['phone']?.toString().trim().isNotEmpty == true
+                      ? contact!['phone'].toString()
+                      : 'Phone number not provided.'),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class PatientHelpRequestCard extends StatefulWidget {
+  const PatientHelpRequestCard({super.key});
+
+  @override
+  State<PatientHelpRequestCard> createState() => _PatientHelpRequestCardState();
+}
+
+class _PatientHelpRequestCardState extends State<PatientHelpRequestCard> {
+  final AlertService _alertService = AlertService();
+  bool _submitting = false;
+
+  Future<void> _submitRequest(String type) async {
+    final controller = TextEditingController();
+    final message = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          type == 'benefit_help' ? 'Request benefit help' : 'Request an appointment',
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 1000,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'How can your ASHA help?',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (message == null || message.trim().isEmpty || !mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      await _alertService.createPatientHelpRequest(type: type, message: message);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Request saved. It does not automatically notify your ASHA.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to save your request. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Request help',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text('Requests are stored in AMMA; no notification is sent.'),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _submitting ? null : () => _submitRequest('benefit_help'),
+            icon: const Icon(Icons.volunteer_activism),
+            label: const Text('Benefit help'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _submitting
+                ? null
+                : () => _submitRequest('appointment_request'),
+            icon: const Icon(Icons.calendar_month),
+            label: const Text('Appointment request'),
+          ),
+        ],
+      ),
+    ),
+  );
 }

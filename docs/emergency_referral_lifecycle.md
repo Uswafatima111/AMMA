@@ -23,16 +23,16 @@ would then be required for that changed API.
 
 ## Orphan emergency request limitation
 
-The service chooses the linked mother and assignment from Firestore, but a
-patient can bypass it and write directly to Firestore. The emergency create
-rule accepts `motherId: null` and `assignedAshaId: null` without checking whether
-any mother document has `patientUid` equal to that patient. Firestore Rules
-cannot query the mothers collection to prove that no link exists. A trusted
-backend that authenticates the patient and looks up the linked mother before
-creation is the safest future fix. A securely maintained patient-to-mother
-pointer in the patient profile, writable only by trusted administrative or
-backend code and checked by rules, is another option. Neither is implemented
-here.
+The service resolves a linked mother before writing an emergency request. The
+rules also reject an unassigned (`motherId: null`) request when the patient's
+`assignedMotherId` profile pointer is present or a legacy `mothers/{patientUid}`
+record exists. Patients cannot clear that pointer themselves. Existing
+generated-ID mother records without `assignedMotherId` backfill remain a gap:
+Firestore Rules cannot query the `mothers` collection to prove that no other
+linked document exists. Backfill those records or move emergency creation to a
+trusted backend before treating the orphan check as complete. A genuinely
+unlinked patient can still create an unassigned request; no ASHA receives it
+through the assigned-request query.
 
 Referrals use a new `referrals` collection because the repository had the
 `ReferralStatus` enum but no referral model, service, or collection workflow.
@@ -43,25 +43,22 @@ hospital contacts or external booking behavior is provided.
 
 ## Emulator verification required
 
-Run the Firestore Emulator with the checked-in `firestore.rules` before release.
-Verify patient creation and own-request read; denial of another patient's
-request; denial of a patient or unrelated ASHA reading or mutating a request;
-former ASHA denial and newly assigned ASHA read/respond/resolve after mother
-reassignment; preservation of response metadata on resolution; rejection of
-skipped/reversed transitions and edits to immutable request fields; and
-unassigned-request denial to ASHAs. Test the direct-write orphan case to
-demonstrate the documented rule limitation. Also verify query authorization for
-the live assigned-mother query, including a mother reassignment while the
-stream is open, and test the 10-mother limit. For referrals, verify creation,
-read and update by the currently assigned ASHA, reassignment, and denial for
-unrelated ASHAs. Rules are not deployed by this change.
+The Firestore Emulator suite now verifies patient emergency creation for a
+linked mother; rejection of a wrong mother/assignment and an orphan request
+from a linked patient; protection of the patient link; emergency transitions,
+immutable identity, and denial of patient/unrelated-ASHA updates; and referral
+acceptance, completion, pending/accepted cancellation, identity protection, and
+denial of invalid or unauthorized updates. It also confirms an unlinked patient
+can still create an unassigned request. Remaining emulator gaps include
+emergency/referral behavior across ASHA reassignment, live query changes, and
+the 10-mother limit. Rules are not deployed by this work.
 
 ## Frontend integration for Munazza
 
 The existing ASHA emergency screen calls `getActiveEmergencies()` and remains
 unchanged per task constraints; the service now follows the signed-in ASHA's
 live assigned-mother set. Ensure any request/status rendering accepts
-`responded` requests. The patient SOS wording should make clear it submits an
+`responded` requests. The patient SOS wording now makes clear it submits an
 in-app request and does not summon an ambulance. Add referral create/list/status
 UI for ASHA workflows and show facility and lifecycle timestamps. Handle
 missing mother/ASHA assignment as an unsent-to-worker request state rather than

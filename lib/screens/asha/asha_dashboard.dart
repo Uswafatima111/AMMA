@@ -132,7 +132,7 @@ class AshaDashboard extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (_) => MotherDetailsScreen(
-                            mother: mother,
+                            mother: {...mother, 'id': motherDocument.id},
                           ),
                         ),
                       );

@@ -1,4 +1,4 @@
-﻿rules_version = '2';
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -44,12 +44,104 @@ service cloud.firestore {
         get(/databases/$(database)/documents/mothers/$(motherId)).data.assignedAshaId == request.auth.uid;
     }
 
+    function canTransitionHelpRequest(from, to) {
+      return (from == 'open' && to in ['read', 'pending', 'accepted', 'cancelled']) ||
+        (from == 'read' && to in ['pending', 'accepted', 'cancelled']) ||
+        (from == 'pending' && to in ['accepted', 'cancelled']) ||
+        (from == 'accepted' && to in ['completed', 'cancelled']);
+    }
+
     function patientOwnsMother(motherId) {
       return isPatient() && motherId is string &&
         exists(/databases/$(database)/documents/mothers/$(motherId)) &&
         (get(/databases/$(database)/documents/mothers/$(motherId)).data.get('patientUid', null) == request.auth.uid ||
           (get(/databases/$(database)/documents/mothers/$(motherId)).data.get('patientUid', null) == null &&
             motherId == request.auth.uid));
+    }
+
+    function healthRecordUserIdMatchesMother(data) {
+      return !data.keys().hasAny(['userId']) ||
+        (data.userId is string &&
+          exists(/databases/$(database)/documents/mothers/$(data.motherId)) &&
+          (get(/databases/$(database)/documents/mothers/$(data.motherId)).data.get('patientUid', null) == data.userId ||
+            (get(/databases/$(database)/documents/mothers/$(data.motherId)).data.get('patientUid', null) == null &&
+              data.motherId == data.userId)));
+    }
+
+    function alertUserIdMatchesMother(data) {
+      return !data.keys().hasAny(['userId']) ||
+        (data.userId is string && data.get('motherId', null) is string &&
+          exists(/databases/$(database)/documents/mothers/$(data.motherId)) &&
+          (get(/databases/$(database)/documents/mothers/$(data.motherId)).data.get('patientUid', null) == data.userId ||
+            (get(/databases/$(database)/documents/mothers/$(data.motherId)).data.get('patientUid', null) == null &&
+              data.motherId == data.userId)));
+    }
+
+    // The only supported userId-only alert shape is the legacy UID-keyed
+    // mother record. Generated-ID patient links must use motherId-scoped
+    // alerts; userId by itself is never sufficient ownership proof.
+    function isVerifiedLegacyPatientAlert(alertId) {
+      return isPatient() &&
+        !resource.data.keys().hasAny(['motherId']) &&
+        resource.data.keys().hasOnly([
+          'id', 'userId', 'title', 'message', 'type', 'severity',
+          'riskLevel', 'status', 'isRead', 'createdAt'
+        ]) &&
+        resource.data.keys().hasAll([
+          'id', 'userId', 'title', 'message', 'type', 'createdAt'
+        ]) &&
+        resource.data.id == alertId &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.title is string &&
+        resource.data.message is string &&
+        resource.data.type is string &&
+        resource.data.createdAt is timestamp &&
+        exists(/databases/$(database)/documents/mothers/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/mothers/$(request.auth.uid)).data.get('patientUid', null) == request.auth.uid ||
+          get(/databases/$(database)/documents/mothers/$(request.auth.uid)).data.get('patientUid', null) == null);
+    }
+
+    // Legacy patient records are exactly the old userId-only shape. Once a
+    // profile has a linked mother (or a UID-keyed legacy mother exists), reads
+    // must use the verified mother relationship instead of this fallback.
+    function isUnlinkedPatientLegacyHealthRecord() {
+      return isPatient() &&
+        !resource.data.keys().hasAny(['motherId']) &&
+        resource.data.get('userId', null) == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('assignedMotherId', null) == null &&
+        !exists(/databases/$(database)/documents/mothers/$(request.auth.uid));
+    }
+
+    function patientAssignedAsha(ashaUid) {
+      let assignedMotherId = get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data.get('assignedMotherId', null);
+
+      return isPatient() && (
+        (assignedMotherId is string &&
+          exists(/databases/$(database)/documents/mothers/$(assignedMotherId)) &&
+          get(/databases/$(database)/documents/mothers/$(assignedMotherId)).data.patientUid == request.auth.uid &&
+          get(/databases/$(database)/documents/mothers/$(assignedMotherId)).data.assignedAshaId == ashaUid) ||
+        (exists(/databases/$(database)/documents/mothers/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/mothers/$(request.auth.uid)).data.assignedAshaId == ashaUid &&
+          (get(/databases/$(database)/documents/mothers/$(request.auth.uid)).data.get('patientUid', null) == request.auth.uid ||
+            get(/databases/$(database)/documents/mothers/$(request.auth.uid)).data.get('patientUid', null) == null))
+      );
+    }
+
+    function validAshaContact(ashaUid) {
+      let profile = get(
+        /databases/$(database)/documents/users/$(ashaUid)
+      ).data;
+
+      return profile.role == 'asha' &&
+        resource.data.keys().hasOnly(['id', 'name', 'phone']) &&
+        resource.data.keys().hasAll(['id', 'name', 'phone']) &&
+        resource.data.id == ashaUid &&
+        resource.data.name is string &&
+        resource.data.phone is string &&
+        resource.data.name == profile.get('name', '') &&
+        resource.data.phone == profile.get('phone', '');
     }
 
     function appointmentMotherId(data) {
@@ -59,8 +151,18 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSelf(uid) ||
-        (isAsha() && resource.data.role == 'patient');
+      // ASHAs may read a patient profile only when its mother link confirms
+      // both the patient identity and the current assignment.
+      allow read: if isSelf(uid) || (isAsha() && resource.data.role == 'patient' && (
+        (resource.data.get('assignedMotherId', null) is string &&
+          exists(/databases/$(database)/documents/mothers/$(resource.data.assignedMotherId)) &&
+          get(/databases/$(database)/documents/mothers/$(resource.data.assignedMotherId)).data.patientUid == uid &&
+          get(/databases/$(database)/documents/mothers/$(resource.data.assignedMotherId)).data.assignedAshaId == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/mothers/$(uid)) &&
+          get(/databases/$(database)/documents/mothers/$(uid)).data.assignedAshaId == request.auth.uid &&
+          (get(/databases/$(database)/documents/mothers/$(uid)).data.get('patientUid', null) == uid ||
+            get(/databases/$(database)/documents/mothers/$(uid)).data.get('patientUid', null) == null))
+      ));
 
       // Users may create only their own patient profile.
       // ASHA profiles must be provisioned by an administrator.
@@ -69,10 +171,44 @@ service cloud.firestore {
         request.resource.data.id == uid;
 
       // A user cannot change their own role.
-      allow update: if isSelf(uid) &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.id == resource.data.id;
+      allow update: if (isSelf(uid) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.id == resource.data.id &&
+          request.resource.data.get('assignedMotherId', null) ==
+            resource.data.get('assignedMotherId', null)) ||
+        (isAsha() && resource.data.role == 'patient' &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['assignedMotherId']) &&
+          request.resource.data.assignedMotherId is string &&
+          existsAfter(/databases/$(database)/documents/mothers/$(request.resource.data.assignedMotherId)) &&
+          getAfter(/databases/$(database)/documents/mothers/$(request.resource.data.assignedMotherId)).data.patientUid == uid &&
+          getAfter(/databases/$(database)/documents/mothers/$(request.resource.data.assignedMotherId)).data.assignedAshaId == request.auth.uid);
 
+      allow delete: if false;
+    }
+
+    // A limited public projection prevents patient reads from exposing email,
+    // role, or other private fields stored on users/{ashaUid}.
+    match /asha_contacts/{ashaUid} {
+      allow get: if validAshaContact(ashaUid) && (
+        (isAsha() && isSelf(ashaUid)) || patientAssignedAsha(ashaUid)
+      );
+      allow list: if false;
+
+      // An ASHA can publish only their own profile-matching contact fields.
+      // Admin SDK provisioning remains available because it bypasses rules.
+      allow create, update: if isAsha() && isSelf(ashaUid) &&
+        request.resource.data.keys().hasOnly(['id', 'name', 'phone']) &&
+        request.resource.data.keys().hasAll(['id', 'name', 'phone']) &&
+        request.resource.data.id == ashaUid &&
+        request.resource.data.name is string &&
+        request.resource.data.phone is string &&
+        request.resource.data.name == get(
+          /databases/$(database)/documents/users/$(ashaUid)
+        ).data.get('name', '') &&
+        request.resource.data.phone == get(
+          /databases/$(database)/documents/users/$(ashaUid)
+        ).data.get('phone', '');
       allow delete: if false;
     }
 
@@ -106,11 +242,11 @@ service cloud.firestore {
     match /health_records/{recordId} {
       allow read: if (
         resource.data.motherId is string &&
-        ((isPatient() && patientOwnsMother(resource.data.motherId)) ||
+        ((isPatient() && patientOwnsMother(resource.data.motherId) &&
+            healthRecordUserIdMatchesMother(resource.data)) ||
           (isAsha() && assignedToMother(resource.data.motherId)))
       ) || (
-        isPatient() &&
-        resource.data.userId == request.auth.uid
+        isUnlinkedPatientLegacyHealthRecord()
       );
 
       // Health records are created by the assigned ASHA.
@@ -118,11 +254,12 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly([
           'id', 'motherId', 'bloodPressure', 'weight', 'hemoglobin',
           'symptoms', 'date', 'recordedAt', 'notes', 'riskLevel',
-          'matchedRules', 'explanation', 'recommendation', 'ruleVersion',
+          'matchedRules', 'explanation', 'recommendation', 'ruleVersion', 'userId',
           'createdBy'
         ]) &&
         request.resource.data.motherId is string &&
         assignedToMother(request.resource.data.motherId) &&
+        healthRecordUserIdMatchesMother(request.resource.data) &&
         request.resource.data.id == recordId &&
         request.resource.data.createdBy == request.auth.uid &&
         request.resource.data.bloodPressure is string &&
@@ -168,8 +305,12 @@ service cloud.firestore {
             'notes', 'reminderEnabled', 'createdAt'
           ]) && request.resource.data.userId == request.auth.uid &&
           request.resource.data.type == 'routine' &&
-          request.resource.data.title is string && request.resource.data.title.size() > 0));
+          request.resource.data.title is string &&
+          request.resource.data.title.size() > 0 &&
+          request.resource.data.title.size() <= 200));
 
+      // ASHAs may edit supplied appointment details while identity, ownership,
+      // status, creator, and creation time remain immutable.
       allow update: if isAsha() &&
         assignedToMother(appointmentMotherId(resource.data)) &&
         request.resource.data.diff(resource.data).affectedKeys()
@@ -209,27 +350,72 @@ service cloud.firestore {
           (isAsha() && assignedToMother(resource.data.motherId)));
       allow update: if isAsha() && assignedToMother(resource.data.motherId) &&
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['active', 'updatedAt']) &&
+          .hasOnly([
+            'medicineName', 'instructions', 'startDate', 'endDate',
+            'reminderTime', 'active', 'updatedAt'
+          ]) &&
+        request.resource.data.medicineName is string &&
+        request.resource.data.medicineName.size() > 0 &&
+        request.resource.data.medicineName.size() <= 120 &&
+        request.resource.data.instructions is string &&
+        request.resource.data.instructions.size() > 0 &&
+        request.resource.data.instructions.size() <= 1000 &&
+        request.resource.data.startDate is timestamp &&
+        request.resource.data.endDate is timestamp &&
+        request.resource.data.startDate <= request.resource.data.endDate &&
+        request.resource.data.reminderTime is string &&
+        request.resource.data.reminderTime.matches('^(?:[01][0-9]|2[0-3]):[0-5][0-9]$') &&
         request.resource.data.active is bool &&
         request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
 
     match /alerts/{alertId} {
-      allow read: if (
+      allow read: if (isAsha() && resource.data.motherId is string &&
+          assignedToMother(resource.data.motherId)) ||
+        (isPatient() && resource.data.motherId is string &&
+          patientOwnsMother(resource.data.motherId) &&
+          alertUserIdMatchesMother(resource.data)) ||
+        isVerifiedLegacyPatientAlert(alertId);
+
+      allow create: if (isAsha() &&
+          request.resource.data.motherId is string &&
+          assignedToMother(request.resource.data.motherId) &&
+          alertUserIdMatchesMother(request.resource.data) &&
+          request.resource.data.id == alertId) ||
+        (isPatient() &&
+          request.resource.data.keys().hasOnly([
+            'id', 'userId', 'motherId', 'assignedAshaId', 'type',
+            'riskLevel', 'message', 'status', 'createdAt'
+          ]) &&
+          request.resource.data.id == alertId &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.motherId is string &&
+          patientOwnsMother(request.resource.data.motherId) &&
+          request.resource.data.assignedAshaId is string &&
+          request.resource.data.assignedAshaId ==
+            get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.assignedAshaId &&
+          request.resource.data.type in ['benefit_help', 'appointment_request'] &&
+          request.resource.data.riskLevel == 'low' &&
+          request.resource.data.message is string &&
+          request.resource.data.message.size() > 0 &&
+          request.resource.data.message.size() <= 1000 &&
+          request.resource.data.status == 'open' &&
+          request.resource.data.createdAt == request.time);
+
+      allow update: if isAsha() &&
+        resource.data.type in ['benefit_help', 'appointment_request'] &&
         resource.data.motherId is string &&
-        canAccessMother(resource.data.motherId)
-      ) || (
-        signedIn() &&
-        resource.data.userId == request.auth.uid
-      );
-
-      allow create: if isAsha() &&
-        request.resource.data.motherId is string &&
-        canAccessMother(request.resource.data.motherId) &&
-        request.resource.data.id == alertId;
-
-      allow update, delete: if false;
+        assignedToMother(resource.data.motherId) &&
+        resource.data.assignedAshaId is string &&
+        resource.data.userId is string &&
+        (get(/databases/$(database)/documents/mothers/$(resource.data.motherId)).data.get('patientUid', null) == resource.data.userId ||
+          (get(/databases/$(database)/documents/mothers/$(resource.data.motherId)).data.get('patientUid', null) == null &&
+            resource.data.motherId == resource.data.userId)) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+        request.resource.data.status is string &&
+        canTransitionHelpRequest(resource.data.status, request.resource.data.status);
+      allow delete: if false;
     }
 
     // Emergency requests are separate from ordinary alerts. The patient can
@@ -252,12 +438,16 @@ service cloud.firestore {
         request.resource.data.respondedBy == null &&
         request.resource.data.resolvedAt == null &&
         request.resource.data.resolvedBy == null &&
-        ((request.resource.data.motherId == null && request.resource.data.assignedAshaId == null) ||
+        ((request.resource.data.motherId == null && request.resource.data.assignedAshaId == null &&
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('assignedMotherId', null) == null &&
+            !exists(/databases/$(database)/documents/mothers/$(request.auth.uid))) ||
           (request.resource.data.motherId is string &&
             exists(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)) &&
+            (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('assignedMotherId', null) == null ||
+              request.resource.data.motherId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedMotherId) &&
             (get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.patientUid == request.auth.uid ||
               (request.resource.data.motherId == request.auth.uid &&
-                get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.userId == request.auth.uid)) &&
+                get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.get('patientUid', null) == null)) &&
             request.resource.data.assignedAshaId == get(/databases/$(database)/documents/mothers/$(request.resource.data.motherId)).data.assignedAshaId));
 
       allow read: if signedIn() && (

@@ -3,8 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-/// Stores reminder instructions only. This service does not schedule or deliver
-/// local notifications, push notifications, or alarms.
+/// Stores and manages ASHA-authored medicine reminder instructions.
 class ReminderService {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
@@ -170,6 +169,62 @@ class ReminderService {
       }
       transaction.update(ref, {
         'active': active,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  /// Edits the supplied reminder details while preserving its identity,
+  /// ownership, creator, creation time, and active state.
+  Future<void> updateReminder({
+    required String reminderId,
+    required String medicineName,
+    required String instructions,
+    required DateTime startDate,
+    required DateTime endDate,
+    required String reminderTime,
+  }) async {
+    final uid = _uid();
+    final ref = _firestore.collection('medicine_reminders').doc(reminderId);
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw StateError('Medicine reminder not found.');
+      final data = snapshot.data()!;
+      final motherId = data['motherId'];
+      if (motherId is! String || motherId.isEmpty) {
+        throw StateError('Reminder mother is missing.');
+      }
+      validateReminder(
+        motherId: motherId,
+        medicineName: medicineName,
+        instructions: instructions,
+        startDate: startDate,
+        endDate: endDate,
+        reminderTime: reminderTime,
+      );
+      final user = await transaction.get(
+        _firestore.collection('users').doc(uid),
+      );
+      final mother = await transaction.get(
+        _firestore.collection('mothers').doc(motherId),
+      );
+      if (!user.exists ||
+          !mother.exists ||
+          !isAssignedAsha(
+            uid: uid,
+            role: user.data()?['role']?.toString() ?? '',
+            assignedAshaId: mother.data()?['assignedAshaId'] as String?,
+          )) {
+        throw StateError(
+          'Only the ASHA assigned to this mother can update reminders.',
+        );
+      }
+      transaction.update(ref, {
+        'medicineName': medicineName.trim(),
+        'instructions': instructions.trim(),
+        'startDate': Timestamp.fromDate(_dateOnly(startDate)),
+        'endDate': Timestamp.fromDate(_dateOnly(endDate)),
+        'reminderTime': reminderTime,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });

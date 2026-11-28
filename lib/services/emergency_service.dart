@@ -85,7 +85,13 @@ class EmergencyService {
       return {...linked.docs.first.data(), 'id': linked.docs.first.id};
     }
     final legacy = await _firestore.collection('mothers').doc(uid).get();
-    return legacy.exists ? {...legacy.data()!, 'id': legacy.id} : null;
+    if (!legacy.exists) return null;
+    final legacyData = legacy.data()!;
+    final legacyPatientUid = legacyData['patientUid'];
+    if (legacyPatientUid != null && legacyPatientUid != uid) {
+      throw StateError('Legacy mother profile belongs to another patient.');
+    }
+    return {...legacyData, 'id': legacy.id};
   }
 
   Future<String> createEmergency({

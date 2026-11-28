@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'asha/asha_dashboard.dart';
 import 'patient/patient_dashboard.dart';
 
+import '../services/asha_service.dart';
 import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -59,6 +60,14 @@ if (role == 'patient') {
     ),
   );
 } else if (role == 'asha') {
+  try {
+    await AshaService().publishOwnContact();
+  } catch (_) {
+    if (mounted) {
+      _showMessage('Signed in, but ASHA contact details could not be published.');
+    }
+  }
+  if (!mounted) return;
   Navigator.pushReplacement(
     context,
     MaterialPageRoute(

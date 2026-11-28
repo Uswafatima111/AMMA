@@ -1,0 +1,13 @@
+{
+  "name": "amma-firestore-rules-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:emulator": "firebase emulators:exec --config ../firebase.json --only firestore --project demo-amma-rules \"npm test\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.0.0"
+  }
+}
